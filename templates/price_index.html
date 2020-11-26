@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>K线</title>
+    <script src="js/jquery-1.7.2.min.js"></script>
+    <script src="js/echarts.min.js"></script>
+    <script src="js/qwebchannel.js"></script>
+    <script src="js/theme/chalk.js"></script>
+</head>
+<style>
+html,body{margin:0;padding:0;background-color: rgb(235,235,235)}
+#chartBox{width: 80%;background-color: rgb(252,252,252);margin: 0 auto}
+</style>
+<body>
+    <div id="chartBox"></div>
+</body>
+<script>
+// 计算净持仓率
+function positionResultHandler(item) {
+    let rate = ((item.long_position - item.short_position) * 100 / item.empty_volume).toFixed(2)
+    if (rate === '0.00'){
+        return '-'
+    } else{
+        return rate
+    }
+}
+// 实例化echarts option的函数
+function generateChartOption(sourceData, baseOption){
+    let chartTitle = baseOption["title"];
+    return {
+        color: ["#ff0000","#0000ff", "#61a0a8"],
+        grid: {
+            bottom: 10,
+            containLabel: true
+        },
+        title:{
+            text: chartTitle,
+            textStyle: {fontSize: 22}
+        },
+        xAxis:{
+            type: 'category',
+            data: sourceData.map(item=>item.date),
+            axisLabel: {
+                rotate: 90,
+                fontSize: 11
+            }
+        },
+        yAxis: [
+            {
+                type: "value",
+                name: "收盘价",
+                nameLocation: 'center',
+                nameGap:55,
+                position:'left'
+            },
+            {
+                type: "value",
+                name: "净持率",
+                nameLocation: 'center',
+                nameGap: 30,
+                position:'right',
+                splitLine:{
+                    show: false
+                }
+            },
+        ],
+        tooltip:{
+            trigger: 'axis',
+            axisPointer: {
+                type: 'cross',
+            }
+        },
+        series: [
+            {
+                type: "line",
+                name: "收盘价",
+                yAxisIndex: 0,
+                connectNulls: true,
+                lineStyle:{
+                    width: 3
+                },
+                symbol:'none',
+                data: sourceData.map(item=>{if (item.close_price === 0){return '-'}else{return item.close_price}})
+            },{
+                type: "line",
+                name: '净持率',
+                yAxisIndex: 1,
+                connectNulls: true,
+                symbol:'none',
+                lineStyle:{
+                    width: 3
+                },
+                data: sourceData.map(positionResultHandler)
+            },
+        ],
+        legend:{
+            type:'plain',
+            right:'13%',
+            top: 30,
+            orient: 'vertical',
+            data:[
+                {name: '收盘价',icon: 'rect'},
+                {name: '净持率', icon: 'rect'},
+            ],
+            itemHeight: 2
+
+        }
+    };
+}
+// 主入口函数
+$(function () {
+    let chartObj = echarts.init(document.getElementById('chartBox'));
+    // 与UI界面通讯的实例
+    new QWebChannel(qt.webChannelTransport, function(channel)
+        {
+            let pageContact = channel.objects.pageContactChannel;
+            // 传入绘图数据
+            pageContact.chartSource.connect(function (sourceData, baseOption, cWidth, cHeight) {
+                let option = generateChartOption(JSON.parse(sourceData), JSON.parse(baseOption));
+                chartObj.clear();
+                chartObj.setOption(option, true)
+            });
+            // 传入重置大小
+            pageContact.chartResize.connect(function (cWidth, cHeight) {
+                chartObj.resize({width: cWidth, height: cHeight});
+            })
+        }
+    );
+})
+</script>
+</html>

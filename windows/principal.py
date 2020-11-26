@@ -4,12 +4,14 @@
 # @Author: zizle
 """ 主窗口 """
 
-from PyQt5.QtWidgets import QMainWindow, QDesktopWidget, QLabel
-from PyQt5.QtGui import QIcon
+from PyQt5.QtWidgets import qApp, QMainWindow, QDesktopWidget, QLabel
+from PyQt5.QtGui import QIcon, QFont, QPalette
+from PyQt5.QtCore import Qt
+from PyQt5.QtNetwork import QNetworkAccessManager
 from settings import WINDOW_TITLE, SYSTEM_MENUS
 
 from .price_position import PricePositionWin
-from .price_index import PriceIndexWin
+from .price_index import WeightPriceWin, DominantPriceWin
 
 
 class MainWindow(QMainWindow):
@@ -27,10 +29,22 @@ class MainWindow(QMainWindow):
         self.resize(available_width * 0.85, available_height * 0.88)
         # 添加菜单栏
         self.menu_bar = self.menuBar()
+        # 状态栏
+        self.status_bar = self.statusBar()
+        self.win_name_label = QLabel('未知窗口', self)
+        self.win_name_label.setFont(QFont("SimHei", 10))
+        pe = QPalette()
+        pe.setColor(QPalette.WindowText, Qt.gray)
+        self.win_name_label.setPalette(pe)
+        self.status_bar.addPermanentWidget(self.win_name_label)
 
         """ 业务逻辑部分 """
         # 设置菜单
         self.set_menus(SYSTEM_MENUS)
+
+        # 给程序绑定网络请求管理器
+        setattr(qApp, 'network', QNetworkAccessManager(qApp))
+
         # 默认显示价格净持仓的窗口
         self.current_win = None
         self.set_default_homepage()
@@ -57,9 +71,10 @@ class MainWindow(QMainWindow):
                 action.triggered.connect(self.select_menu_action)
 
     def set_default_homepage(self):
-        win = PricePositionWin()
+        win = PricePositionWin(self)
         self.setCentralWidget(win)
         self.current_win = 11  # 价格净持率的窗口id(详见settings.py)
+        self.win_name_label.setText("价格-净持率")
 
     def select_menu_action(self):
         """ 选择了某个菜单 """
@@ -70,13 +85,16 @@ class MainWindow(QMainWindow):
             return
         self.setCentralWidget(self.enter_menu_window(action_id, action_text))
         self.current_win = action_id
+        self.win_name_label.setText(action_text)
 
     def enter_menu_window(self, action_id, action_text):
         """ 进入菜单选择的窗口 """
         if action_id == 11:
-            page = PricePositionWin()  # 价格持仓窗口
-        elif action_id == 12:  # 价格指数窗口
-            page = PriceIndexWin()
+            page = PricePositionWin(self)  # 价格持仓窗口
+        elif action_id == 12:  # 权重价格指数窗口
+            page = WeightPriceWin(self)
+        elif action_id == 13:  # 主力合约价格指数窗口
+            page = DominantPriceWin(self)
         else:
             page = QLabel("该功能未开放")
         return page
