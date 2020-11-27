@@ -16,18 +16,21 @@ html,body{margin:0;padding:0;background-color: rgb(235,235,235)}
     <div id="chartBox"></div>
 </body>
 <script>
-// 计算净持仓率
-function positionResultHandler(item) {
-    let rate = ((item.long_position - item.short_position) * 100 / item.empty_volume).toFixed(2)
-    if (rate === '0.00'){
-        return '-'
-    } else{
-        return rate
+// 获取作图的数据
+function getLineData(priceNameEn, sourceData) {
+    if(priceNameEn === 'weight'){
+        return sourceData.map(item=>{if (item.weight_price === 0.00){return '-'}else{return item.weight_price}})
+    }else if(priceNameEn === 'dominant'){
+        return sourceData.map(item=>{if (item.dominant_price === 0){return '-'}else{return item.dominant_price}})
+    }else{
+        return []
     }
 }
 // 实例化echarts option的函数
 function generateChartOption(sourceData, baseOption){
     let chartTitle = baseOption["title"];
+    let priceName = baseOption['price_name'];
+    let priceNameEn = baseOption['price_name_en']
     return {
         color: ["#ff0000","#0000ff", "#61a0a8"],
         grid: {
@@ -49,21 +52,11 @@ function generateChartOption(sourceData, baseOption){
         yAxis: [
             {
                 type: "value",
-                name: "收盘价",
+                name: priceName,
                 nameLocation: 'center',
                 nameGap:55,
                 position:'left'
-            },
-            {
-                type: "value",
-                name: "净持率",
-                nameLocation: 'center',
-                nameGap: 30,
-                position:'right',
-                splitLine:{
-                    show: false
-                }
-            },
+            }
         ],
         tooltip:{
             trigger: 'axis',
@@ -74,25 +67,15 @@ function generateChartOption(sourceData, baseOption){
         series: [
             {
                 type: "line",
-                name: "收盘价",
+                name: priceName,
                 yAxisIndex: 0,
                 connectNulls: true,
                 lineStyle:{
                     width: 3
                 },
                 symbol:'none',
-                data: sourceData.map(item=>{if (item.close_price === 0){return '-'}else{return item.close_price}})
-            },{
-                type: "line",
-                name: '净持率',
-                yAxisIndex: 1,
-                connectNulls: true,
-                symbol:'none',
-                lineStyle:{
-                    width: 3
-                },
-                data: sourceData.map(positionResultHandler)
-            },
+                data: getLineData(priceNameEn, sourceData)
+            }
         ],
         legend:{
             type:'plain',
@@ -100,8 +83,7 @@ function generateChartOption(sourceData, baseOption){
             top: 30,
             orient: 'vertical',
             data:[
-                {name: '收盘价',icon: 'rect'},
-                {name: '净持率', icon: 'rect'},
+                {name: priceName,icon: 'rect'}
             ],
             itemHeight: 2
 
@@ -116,7 +98,7 @@ $(function () {
         {
             let pageContact = channel.objects.pageContactChannel;
             // 传入绘图数据
-            pageContact.chartSource.connect(function (sourceData, baseOption, cWidth, cHeight) {
+            pageContact.lineData.connect(function (sourceData, baseOption) {
                 let option = generateChartOption(JSON.parse(sourceData), JSON.parse(baseOption));
                 chartObj.clear();
                 chartObj.setOption(option, true)

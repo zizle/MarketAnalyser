@@ -8,7 +8,8 @@ from PyQt5.QtCore import QObject, pyqtSignal
 
 # 指数信道
 class PriceIndexChannel(QObject):
-    lineData = pyqtSignal()   # 普通数据
+    # 参数1：作图的源数据; 参数2: 基本配置信息
+    lineData = pyqtSignal(str, str)   # 普通数据
     seasonData = pyqtSignal()  # 季节数据
     # 参数1: 图形宽度; 参数2: 图形高度
     chartResize = pyqtSignal(int, int)

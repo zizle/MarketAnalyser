@@ -18,18 +18,21 @@ html,body{margin:0;padding:0;background-color: rgb(235,235,235)}
 <script>
 // 计算净持仓率
 function positionResultHandler(item) {
-    let rate = ((item.long_position - item.short_position) * 100 / item.empty_volume).toFixed(2)
-    if (rate === '0.00'){
-        return '-'
-    } else{
-        return rate
+    if (item.empty_volume === 0){return '-'}
+    else{
+        let rate = ((item.long_position - item.short_position) * 100 / item.empty_volume).toFixed(2)
+        if (rate === '0.00'){
+            return '-'
+        } else{
+            return rate
+        }
     }
 }
 // 实例化echarts option的函数
 function generateChartOption(sourceData, baseOption){
     let chartTitle = baseOption["title"];
     return {
-        color: ["#ff0000","#0000ff", "#61a0a8"],
+        color: ["#0000ff","#ff0000", "#61a0a8"],
         grid: {
             bottom: 10,
             containLabel: true
@@ -69,6 +72,12 @@ function generateChartOption(sourceData, baseOption){
             trigger: 'axis',
             axisPointer: {
                 type: 'cross',
+            }
+        },
+        toolbox:{
+            feature:{
+                dataZoom:{},
+                dataView:{},
             }
         },
         series: [
@@ -116,7 +125,7 @@ $(function () {
         {
             let pageContact = channel.objects.pageContactChannel;
             // 传入绘图数据
-            pageContact.chartSource.connect(function (sourceData, baseOption, cWidth, cHeight) {
+            pageContact.chartSource.connect(function (sourceData, baseOption) {
                 let option = generateChartOption(JSON.parse(sourceData), JSON.parse(baseOption));
                 chartObj.clear();
                 chartObj.setOption(option, true)

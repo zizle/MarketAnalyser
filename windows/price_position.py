@@ -151,7 +151,7 @@ class PricePositionWin(QWidget):
         """ 日期值返回 """
         reply = self.sender()
         if reply.error():
-            logger.error("GET MIN & MAX DATE ERROR. STATUS:{}".format(reply.error()))
+            logger.error("GET MIN & MAX DATE WITH CONTRACT ERROR. STATUS:{}".format(reply.error()))
         else:
             data = json.loads(reply.readAll().data().decode('utf8'))
             min_max_date = data["dates"]
@@ -160,6 +160,9 @@ class PricePositionWin(QWidget):
 
     def set_min_and_max_date(self, min_date: int, max_date: int):
         """ 设置最大最小日期 """
+        if not min_date or not max_date:
+            self.analysis_button.setEnabled(False)
+            return
         min_date = datetime.datetime.fromtimestamp(min_date)
         max_date = datetime.datetime.fromtimestamp(max_date)
         q_min_date = QDate(min_date.year, min_date.month, min_date.day)
@@ -168,6 +171,7 @@ class PricePositionWin(QWidget):
         self.start_date.setDate(q_min_date)
         self.end_date.setDateRange(q_min_date, q_max_date)
         self.end_date.setDate(q_max_date)
+        self.analysis_button.setEnabled(True)
 
     def get_analysis_data(self):
         """ 获取结果数据 """

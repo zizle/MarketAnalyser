@@ -93,8 +93,10 @@ class MainWindow(QMainWindow):
             page = PricePositionWin(self)  # 价格持仓窗口
         elif action_id == 12:  # 权重价格指数窗口
             page = WeightPriceWin(self)
+            page.set_current_price_index('weight')
         elif action_id == 13:  # 主力合约价格指数窗口
             page = DominantPriceWin(self)
+            page.set_current_price_index('dominant')
         else:
             page = QLabel("该功能未开放")
         return page
