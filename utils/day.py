@@ -11,6 +11,6 @@ def generate_days_of_year():
     start_day = datetime.datetime.strptime("2020-01-01", "%Y-%m-%d")
     end_day = datetime.datetime.strptime("2020-12-31", "%Y-%m-%d")
     while start_day <= end_day:
-        days_list.append(start_day.strftime("%m-%d"))
+        days_list.append(start_day.strftime("%m%d"))
         start_day += datetime.timedelta(days=1)
     return days_list

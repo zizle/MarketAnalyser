@@ -8,26 +8,51 @@ import datetime
 import json
 import pandas as pd
 from PyQt5.QtWidgets import (qApp, QWidget, QHBoxLayout, QVBoxLayout, QLabel, QComboBox, QDateEdit, QPushButton,
-                             QSplitter, QTableWidget, QHeaderView, QTableWidgetItem)
+                             QSplitter, QTableWidget, QHeaderView, QTableWidgetItem, QAbstractItemView, QFileDialog)
 from PyQt5.QtCore import Qt, QMargins, QUrl, QDate
-from PyQt5.QtGui import QColor, QBrush
+from PyQt5.QtGui import QColor, QBrush, QFont
 from PyQt5.QtNetwork import QNetworkRequest
-from widgets import TitleOptionWidget, WebChartWidget
+from PyQt5.QtWebEngineWidgets import QWebEngineView
+from PyQt5.QtWebChannel import QWebChannel
+from widgets import TitleOptionWidget, LoadingCover
 from channels.price_index import PriceIndexChannel
 from settings import EXCHANGES, SERVER_API
 from utils.logger import logger
 from utils.day import generate_days_of_year
+from utils.constant import HORIZONTAL_HEADER_STYLE, VERTICAL_SCROLL_STYLE, HORIZONTAL_SCROLL_STYLE
 
 
-class ChartContainWidget(WebChartWidget):
-    def set_chart_option(self, source_data, base_option):
+class ChartContainWidget(QWebEngineView):
+    def __init__(self, web_channel, file_url, *args, **kwargs):
+        super(ChartContainWidget, self).__init__(*args, **kwargs)
+        # 加载图形容器
+        self.page().load(QUrl(file_url))  # 加载页面
+        # 设置与页面信息交互的通道
+        channel_qt_obj = QWebChannel(self.page())  # 实例化qt信道对象,必须传入页面参数
+        self.contact_channel = web_channel  # 页面信息交互通道
+        self.page().setWebChannel(channel_qt_obj)
+        channel_qt_obj.registerObject("pageContactChannel", self.contact_channel)  # 信道对象注册信道，只能注册一个
+
+    def set_line_chart_option(self, source_data, base_option):
         """ 传入数据设置图形 """
         self.contact_channel.lineData.emit(source_data, base_option)
-        self.contact_channel.chartResize.emit(self.width() * 0.8, self.height())
+        self.resize_chart()
+
+    def set_season_chart_option(self, source_data, base_option):
+        """ 设置季节图形 """
+        self.contact_channel.seasonData.emit(source_data, base_option)
+        self.resize_chart()
+        
+    def resizeEvent(self, event):
+        super(ChartContainWidget, self).resizeEvent(event)
+        self.resize_chart()
+
+    def resize_chart(self):
+        self.contact_channel.chartResize.emit(self.width(), self.height())
 
 
 class PriceIndexWin(QWidget):
-    """ 价格净持仓窗口 """
+    """ 价格指数窗口 """
 
     def __init__(self, *args, **kwargs):
         super(PriceIndexWin, self).__init__(*args, **kwargs)
@@ -56,52 +81,102 @@ class PriceIndexWin(QWidget):
 
         self.analysis_button = QPushButton("开始分析", self)
         title_layout.addWidget(self.analysis_button)
-        # 查看涨跌
-        self.season_button = QPushButton('季节图表', self)
-        self.season_button.setEnabled(False)
-        title_layout.addWidget(self.season_button)
+        # 切换涨跌和图形的按钮
+        self.swap_data_button = QPushButton('季节图表', self)
+        self.swap_data_button.setEnabled(False)
+        title_layout.addWidget(self.swap_data_button)
 
         self.option_widget = TitleOptionWidget(self)
         self.option_widget.setLayout(title_layout)
         layout.addWidget(self.option_widget)
 
         # 图形表格拖动区
-        splitter = QSplitter(Qt.Vertical, self)
-        splitter.setContentsMargins(QMargins(10, 5, 10, 5))
+        self.splitter = QSplitter(Qt.Vertical, self)
+        self.splitter.setContentsMargins(QMargins(0, 0, 0, 0))
+
+        # 请求数据遮罩层(需放在splitter之后才能显示,不然估计是被splitter覆盖)
+        self.loading_cover = LoadingCover()
+        self.loading_cover.setParent(self)
+        self.loading_cover.resize(self.parent().width(), self.parent().height())
+
         # 图形区
-        self.chart_container = ChartContainWidget(PriceIndexChannel(), 'file:///templates/price_index.html', self)
-        splitter.addWidget(self.chart_container)
+        self.loading_cover.show(text='加载资源中')
+        self.chart_container = ChartContainWidget(PriceIndexChannel(), 'file:/templates/price_index.html', self)
+        self.chart_container.page().loadFinished.connect(self.page_load_finished)
+        self.splitter.addWidget(self.chart_container)
         # 表格区
         table_widget = QWidget(self)
         table_layout = QVBoxLayout()
+        table_layout.setContentsMargins(QMargins(0, 0, 0, 0))
+        table_option_layout = QHBoxLayout()
+        table_option_layout.addStretch()
+
         self.unit_label = QLabel('单位:%')
         self.unit_label.hide()
-        table_layout.addWidget(self.unit_label, alignment=Qt.AlignRight | Qt.AlignTop)
+        table_option_layout.addWidget(self.unit_label)
+
+        self.export_button = QPushButton('导出EXCEL', self)
+        self.export_button.setEnabled(False)
+        table_option_layout.addWidget(self.export_button)
+
+        table_layout.addLayout(table_option_layout)
         self.data_table = QTableWidget(self)
         self.data_table.setColumnCount(4)
         self.data_table.setHorizontalHeaderLabels(['日期', '价格指数', '总持仓', '总成交量'])
+        self.data_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        self.data_table.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.data_table.setFocusPolicy(Qt.NoFocus)
+        self.data_table.horizontalHeader().setStyleSheet(HORIZONTAL_HEADER_STYLE)
+        self.data_table.horizontalScrollBar().setStyleSheet(HORIZONTAL_SCROLL_STYLE)
+        self.data_table.verticalScrollBar().setStyleSheet(VERTICAL_SCROLL_STYLE)
+        self.data_table.verticalHeader().hide()
         self.data_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.data_table.verticalHeader().setDefaultSectionSize(18)  # 设置行高(与下行代码同时才生效)
+        self.data_table.verticalHeader().setMinimumSectionSize(18)
         table_layout.addWidget(self.data_table)
 
         # 涨跌幅表格
+        font = QFont()
+        font.setPointSize(9)
         self.up_down_table = QTableWidget(self)
         self.up_down_table.verticalHeader().hide()
         self.up_down_table.horizontalHeader().hide()
+        self.up_down_table.setFont(font)
+        self.up_down_table.horizontalHeader().setStyleSheet(HORIZONTAL_HEADER_STYLE)
+        self.up_down_table.horizontalScrollBar().setStyleSheet(HORIZONTAL_SCROLL_STYLE)
+        self.up_down_table.verticalScrollBar().setStyleSheet(VERTICAL_SCROLL_STYLE)
+        self.up_down_table.verticalHeader().setDefaultSectionSize(18)  # 设置行高(与下行代码同时才生效)
+        self.up_down_table.verticalHeader().setMinimumSectionSize(18)
+        self.up_down_table.setFocusPolicy(Qt.NoFocus)
         table_layout.addWidget(self.up_down_table)
 
         table_widget.setLayout(table_layout)
 
-        splitter.addWidget(table_widget)
+        self.splitter.addWidget(table_widget)
         self.up_down_table.hide()
 
-        splitter.setSizes([self.parent().height() * 0.6, self.parent().height() * 0.4, self.parent().height() * 0.4])
+        self.splitter.setSizes([self.parent().height() * 0.6, self.parent().height() * 0.4, self.parent().height() * 0.4])
 
-        layout.addWidget(splitter)
+        self.splitter.setFixedWidth(self.parent().width() * 0.8)
+
+        layout.addWidget(self.splitter, alignment=Qt.AlignHCenter)
         self.setLayout(layout)
+        self.data_table.setObjectName('dataTable')
+        self.data_table.setAlternatingRowColors(True)
+        self.up_down_table.setObjectName('upDownTable')
+        self.setStyleSheet(
+            "#dataTable{selection-color:rgb(80,100,200);selection-background-color:rgb(220,220,220);"
+            "alternate-background-color:rgb(245,250,248);gridline-color:rgb(60,60,60)}"
+            "#upDownTable{selection-color:rgb(252,252,252);selection-background-color:rgb(33,66,131);"
+            "gridline-color:rgb(60,60,60)}"
+        )
 
         """ 逻辑业务部分 """
-        self.source_df = None
-        self.current_price_index = None
+        self.table_head_font = QFont()
+        self.table_head_font.setBold(True)
+        self.source_df = None  # 源数据
+        self.current_price_index = None  # 当前要显示的数据类型
+        self.current_show = 'source_price'  # 当前显示的界面 `source_price`为显示价格；`amplitude`为涨跌与波幅
         self.network_manager = getattr(qApp, 'network')
         # 关联交易所改变信号
         self.exchange_combobox.currentTextChanged.connect(self.get_variety_with_exchange)
@@ -112,8 +187,18 @@ class PriceIndexWin(QWidget):
             self.exchange_combobox.addItem(exchange_item['name'], exchange_item['id'])
         # 关联开始计算信号
         self.analysis_button.clicked.connect(self.get_price_index_data)
-        # 管理季节图表信号
-        self.season_button.clicked.connect(self.generate_season_chart)
+        # 关联季节图表信号
+        self.swap_data_button.clicked.connect(self.swap_data_show_style)
+        # 导出数据信号
+        self.export_button.clicked.connect(self.export_result_to_excel)
+
+    def resizeEvent(self, event):
+        super(PriceIndexWin, self).resizeEvent(event)
+        self.splitter.setFixedWidth(self.parent().width() * 0.8)
+        self.loading_cover.resize(self.parent().width(), self.parent().height())
+
+    def page_load_finished(self):
+        self.loading_cover.hide()
 
     def set_current_price_index(self, index_type: str):
         """ 设置当前窗口类型 """
@@ -124,8 +209,38 @@ class PriceIndexWin(QWidget):
             self.current_price_index = None
         self.current_price_index = index_type
 
+    def swap_data_show_style(self, init_flag):
+        """ 转换数据显示
+        :param init_flag: 按钮点击会传入一个False，初始显示默认传入True
+        """
+        if self.current_price_index is None:
+            return
+        if init_flag:
+            self.set_current_data_to_page()
+            self.set_current_data_to_table()
+            self.up_down_table.hide()
+            self.data_table.show()
+            return
+        # 非初始显示就是切换
+        if self.current_show == 'source_price':
+            # 切换为波幅
+            self.generate_season_chart()
+            self.data_table.hide()
+            self.up_down_table.show()
+            self.current_show = 'amplitude'
+        elif self.current_show == 'amplitude':
+            # 切换为价格数据
+            self.set_current_data_to_page()
+            self.set_current_data_to_table()
+            self.data_table.show()
+            self.up_down_table.hide()
+            self.current_show = 'source_price'
+        else:
+            pass
+
     def get_variety_with_exchange(self):
         """ 获取交易所下的所有品种 """
+        self.loading_cover.show(text='正在获取品种')
         url = SERVER_API + 'exchange-variety/?is_real=1&exchange={}'.format(self.exchange_combobox.currentData())
         reply = self.network_manager.get(QNetworkRequest(QUrl(url)))
         reply.finished.connect(self.exchange_variety_reply)
@@ -139,6 +254,7 @@ class PriceIndexWin(QWidget):
             data = json.loads(reply.readAll().data().decode('utf8'))
             self.set_current_variety(data['varieties'])
         reply.deleteLater()
+        self.loading_cover.hide()
 
     def set_current_variety(self, varieties: list):
         """ 设置当前的品种 """
@@ -150,6 +266,7 @@ class PriceIndexWin(QWidget):
         """ 根据品种获取最大最小时间 """
         if not self.variety_combobox.currentData():
             return
+        self.loading_cover.show(text='正在获取日期范围')
         url = SERVER_API + 'price-index-dates/?variety_en={}'.format(self.variety_combobox.currentData())
         reply = self.network_manager.get(QNetworkRequest(QUrl(url)))
         reply.finished.connect(self.min_max_date_reply)
@@ -163,11 +280,13 @@ class PriceIndexWin(QWidget):
             min_max_date = data["dates"]
             self.set_min_and_max_dates(min_max_date['min_date'], min_max_date['max_date'])
         reply.deleteLater()
+        self.loading_cover.hide()
 
     def set_min_and_max_dates(self, min_date: int, max_date: int):
         """ 设置最大最小日期 """
         if not min_date or not max_date:
             self.analysis_button.setEnabled(False)
+            self.swap_data_button.setEnabled(False)
             return
         min_date = datetime.datetime.fromtimestamp(min_date)
         max_date = datetime.datetime.fromtimestamp(max_date)
@@ -178,14 +297,17 @@ class PriceIndexWin(QWidget):
         self.end_date.setDateRange(q_min_date, q_max_date)
         self.end_date.setDate(q_max_date)
         self.analysis_button.setEnabled(True)
+        self.swap_data_button.setEnabled(True)
 
     def get_price_index_data(self):
         """ 获取价格指数数据 """
         # 还原属性
-        self.season_button.setEnabled(False)
+        self.swap_data_button.setEnabled(False)
+        self.export_button.setEnabled(False)
         if self.source_df is not None:
             del self.source_df
             self.source_df = None
+        self.loading_cover.show(text='正在获取数据资源')
         # 获取条件
         min_date = int(datetime.datetime.strptime(self.start_date.text(), '%Y-%m-%d').timestamp())
         max_date = int(datetime.datetime.strptime(self.end_date.text(), '%Y-%m-%d').timestamp())
@@ -205,24 +327,65 @@ class PriceIndexWin(QWidget):
             # 将数据转为df保存到对象属性中
             self.source_df = pd.DataFrame(data['data'], columns=['date', 'variety_en', 'total_position', 'total_trade',
                                                                  'dominant_price', 'weight_price'])
-            self.set_current_data_to_table(data['data'].copy())
-            self.set_current_data_to_page(json.dumps(data['data']), data['base_option'])
+            self.swap_data_show_style(True)
             # 开放季节图形可点
-            self.season_button.setEnabled(True)
+            self.swap_data_button.setEnabled(True)
+            # 开放导出数据
+            self.export_button.setEnabled(True)
         reply.deleteLater()
+        self.loading_cover.hide()
 
-    def set_current_data_to_table(self, data_items: list):
-        pass
+    def set_current_data_to_table(self):
+        if self.source_df is None:
+            return
+        self.data_table.clear()
+        self.data_table.setColumnCount(5)
+        if self.current_price_index == 'weight':
+            self.data_table.setHorizontalHeaderLabels(['日期', '品种', '权重价格', '成交量合计', '持仓量合计'])
+            price_key = 'weight_price'
+        else:
+            self.data_table.setHorizontalHeaderLabels(['日期', '品种', '主力价格', '成交量合计', '持仓量合计'])
+            price_key = 'dominant_price'
+        data_items = self.source_df.to_dict(orient='records')
+        self.data_table.setRowCount(len(data_items))
+        # 反序
+        data_items.reverse()
 
-    def set_current_data_to_page(self, source_data: str, base_option: str):
-        pass
+        for row, row_item in enumerate(data_items):
+            t_item0 = QTableWidgetItem(row_item['date'])
+            t_item0.setTextAlignment(Qt.AlignCenter)
+            self.data_table.setItem(row, 0, t_item0)
+            t_item1 = QTableWidgetItem(row_item['variety_en'])
+            t_item1.setTextAlignment(Qt.AlignCenter)
+            self.data_table.setItem(row, 1, t_item1)
+            t_item2 = QTableWidgetItem(format(row_item[price_key], ','))
+            t_item2.setTextAlignment(Qt.AlignCenter)
+            self.data_table.setItem(row, 2, t_item2)
+            t_item3 = QTableWidgetItem(format(row_item['total_trade'], ','))
+            t_item3.setTextAlignment(Qt.AlignCenter)
+            self.data_table.setItem(row, 3, t_item3)
+            t_item4 = QTableWidgetItem(format(row_item['total_position'], ','))
+            t_item4.setTextAlignment(Qt.AlignCenter)
+            self.data_table.setItem(row, 4, t_item4)
+
+    def set_current_data_to_page(self):
+        if self.source_df is None:
+            return
+        base_option = dict()
+        source_data = self.source_df.to_dict(orient='records')
+        name, name_en = ('权重', 'weight') if self.current_price_index == 'weight' else ('主力', 'dominant')
+        base_option['title'] = '{}价格指数'.format(name)
+        base_option['price_name'] = '{}价格'.format(name)
+        base_option['price_name_en'] = name_en
+        self.chart_container.set_line_chart_option(json.dumps(source_data), json.dumps(base_option))
 
     def swap_table(self):
         """ 切换显示的表格 """
+        
         self.data_table.setVisible(self.data_table.isHidden())
         self.up_down_table.setVisible(self.up_down_table.isHidden())
         self.unit_label.setVisible(self.unit_label.isHidden())
-        self.season_button.setText('季节图表' if self.season_button.text() == '数据图表' else '数据图表')
+        self.swap_data_button.setText('季节图表' if self.swap_data_button.text() == '数据图表' else '数据图表')
 
     def generate_season_chart(self):
         """ 生成季节图形数据作图 """
@@ -230,18 +393,20 @@ class PriceIndexWin(QWidget):
             return
         self.swap_table()
         # 生成需要的结果数据
-        try:
-            chart_source_data, up_down_data = self.calculate_season_result_data(self.source_df)
-            print(chart_source_data)
-            print(up_down_data)
-            # 数据在表格展示
-            self.set_data_to_up_down_table(up_down_data)
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            print(e)
+        chart_source_data, up_down_data = self.calculate_season_result_data(self.source_df)
+        # 数据在图形展示
+        name = '持仓权重均价' if self.current_price_index == 'weight' else '主力合约价'
+        base_option = {
+            'title': '{}{}季节分析'.format(self.variety_combobox.currentText(), name),
+            'price_name_en': self.current_price_index,
+            'y_axis_name': name
+        }
+        self.chart_container.set_season_chart_option(json.dumps(chart_source_data), json.dumps(base_option))
+        # 数据在表格展示
+        self.set_data_to_up_down_table(up_down_data)
 
     def set_data_to_up_down_table(self, table_data: dict):
+        """ 填充涨跌波幅表格数据 """
         self.up_down_table.clear()
         self.up_down_table.setColumnCount(25)
         self.up_down_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
@@ -256,6 +421,7 @@ class PriceIndexWin(QWidget):
                 self.up_down_table.setSpan(0, col_index, 1, 2)
                 month_name_item = QTableWidgetItem('{}月'.format('%02d' % month_name))
                 month_name_item.setTextAlignment(Qt.AlignCenter)
+                month_name_item.setFont(self.table_head_font)
                 self.up_down_table.setItem(0, col_index, month_name_item)
                 up_down_name = QTableWidgetItem('涨跌')
                 up_down_name.setTextAlignment(Qt.AlignCenter)
@@ -270,7 +436,9 @@ class PriceIndexWin(QWidget):
         row_index = 2
         for year, year_dict in table_data.items():
             # 0列放的是年
-            year_item = QTableWidgetItem("{}年".format(year))
+            year_item = QTableWidgetItem(str(year))
+            year_item.setTextAlignment(Qt.AlignCenter)
+            year_item.setFont(self.table_head_font)
             self.up_down_table.setItem(row_index, 0, year_item)
             month = 1
             for col in range(1, 25):  # 列， 奇数填的是涨跌，偶数填的是波幅
@@ -310,6 +478,7 @@ class PriceIndexWin(QWidget):
             self.up_down_table.insertRow(new_row)
             name_item = QTableWidgetItem(row_name)
             name_item.setTextAlignment(Qt.AlignCenter)
+            name_item.setFont(self.table_head_font)
             self.up_down_table.setItem(new_row, 0, name_item)
 
         for col in range(1, 25):
@@ -342,6 +511,8 @@ class PriceIndexWin(QWidget):
                     sum_value += column_value
             avg_value = '' if sum_count == 0 else str(round((sum_value / sum_count), 2))
             table_row_count = self.up_down_table.rowCount()
+            if col % 2 == 0:  # 波幅列无需计个数
+                up_count = down_count = '-'
             new_item1 = QTableWidgetItem(str(up_count))
             new_item1.setTextAlignment(Qt.AlignCenter)
             self.up_down_table.setItem(table_row_count - 5, col, new_item1)
@@ -358,9 +529,10 @@ class PriceIndexWin(QWidget):
             new_item5.setTextAlignment(Qt.AlignCenter)
             if avg_value and avg_value > '0':
                 new_item5.setBackground(QBrush(QColor(146, 31, 40)))
+                new_item5.setForeground(QBrush(QColor(254, 254, 254)))
             if avg_value and avg_value < '0':
                 new_item5.setBackground(QBrush(QColor(20, 180, 56)))
-
+                new_item5.setForeground(QBrush(QColor(254, 254, 254)))
             self.up_down_table.setItem(table_row_count - 1, col, new_item5)
 
     @staticmethod
@@ -418,11 +590,11 @@ class PriceIndexWin(QWidget):
                     # 计算波幅(权重)
                     weight_min_price = month_df['weight_price'].min()
                     weight_max_price = month_df['weight_price'].max()
-                    weight_amplitude = round((weight_max_price - weight_min_price) * 100 / weight_min_price, 2)
+                    weight_amplitude = 0 if weight_min_price == 0 else round((weight_max_price - weight_min_price) * 100 / weight_min_price, 2)
                     # 计算波幅(主力)
                     dominant_min_price = month_df['dominant_price'].min()
                     dominant_max_price = month_df['dominant_price'].max()
-                    dominant_amplitude = round((dominant_max_price - dominant_min_price) * 100 / dominant_min_price, 2)
+                    dominant_amplitude = 0 if dominant_min_price == 0 else round((dominant_max_price - dominant_min_price) * 100 / dominant_min_price, 2)
                 # 整理出结果
                 month_up_down[str(year) + month] = {
                     'weight_up_down': weight_up_down,
@@ -434,69 +606,93 @@ class PriceIndexWin(QWidget):
 
         return target_values, up_down_values
 
+    def export_result_to_excel(self):
+        """ 导出数据到excel """
+        # 1 读取数据
+        table_df = self.read_data_from_table()
+        # 2 选择路径
+        # 保存的文件名称
+        if self.current_price_index == 'weight':
+            name = '权重'
+        elif self.current_price_index == 'dominant':
+            name = '主力'
+        else:
+            name = ''
+        data_type, op_flag = ('指数', False) if self.current_show == 'source_price' else ('涨跌波幅', True)
+        filename = '{}-{}{}数据'.format(self.variety_combobox.currentText(), name, data_type)
+        filepath, _ = QFileDialog.getSaveFileName(self, '保存文件', filename, 'EXCEL文件(*.xlsx *.xls)')
+        # 3 导出当前数据
+        if filepath:
+            # 3 导出数据
+            writer = pd.ExcelWriter(filepath, engine='xlsxwriter', datetime_format='YYYY-MM-DD')
+            sheet_name = '{}-{}'.format(name, data_type)
+            # 多级表头默认会出现一个空行,需改pandas源码,这里不做处理
+            table_df.to_excel(writer, sheet_name=sheet_name, encoding='utf8', index=op_flag,
+                              merge_cells=op_flag)
+            if op_flag:
+                work_sheets = writer.sheets[sheet_name]
+                book_obj = writer.book
+                format_obj = book_obj.add_format({'num_format': '0.00%', 'font_name': 'Arial', 'font_size': 9})
+                work_sheets.set_column('A:Z', 6, cell_format=format_obj)
+            writer.save()
+
+    def read_data_from_table(self):
+        if self.current_show == 'source_price':  # 读取data_table
+            return self.read_data_table()
+        elif self.current_show == 'amplitude':  # 读取up_down_table
+            return self.read_up_down_table()
+        else:
+            return pd.DataFrame()
+
+    def read_data_table(self):
+        """ 读取源数据 """
+        header_list = []
+        value_list = []
+        for header_col in range(self.data_table.columnCount()):
+            header_list.append(
+                self.data_table.horizontalHeaderItem(header_col).text()
+            )
+        for row in range(self.data_table.rowCount()):
+            row_list = []
+            for col in range(self.data_table.columnCount()):
+                item_value = self.data_table.item(row, col).text()
+                try:
+                    value = datetime.datetime.strptime(item_value, '%Y%m%d') if col == 0 else float(
+                        self.data_table.item(row, col).text().replace(',', ''))
+                except ValueError:
+                    value = item_value
+                row_list.append(value)
+            value_list.append(row_list)
+        return pd.DataFrame(value_list, columns=header_list)
+
+    def read_up_down_table(self):
+        """ 读取涨跌波幅表 """
+        columns = pd.MultiIndex.from_product([
+            ['1月', '2月', '3月', '4月', '5月', '6月', '7月', '8月', '9月', '10月', '11月', '12月'],
+            ['涨跌', '波幅']
+        ])
+        value_list = []
+        row_index = []
+        for row in range(2, self.up_down_table.rowCount()):
+            row_list = []
+            row_index.append(self.up_down_table.item(row, 0).text())
+            for col in range(1, self.up_down_table.columnCount()):
+                item_value = self.up_down_table.item(row, col).text()
+                try:
+                    value = float(item_value) / 100  # 后面to_excel格式化为0.00%
+                except ValueError:
+                    value = item_value
+                row_list.append(value)
+            value_list.append(row_list)
+        return pd.DataFrame(value_list, columns=columns, index=row_index)
+
 
 # 权重指数窗口
 class WeightPriceWin(PriceIndexWin):
-
-    def set_current_data_to_table(self, data_items: list):
-        self.data_table.clear()
-        self.data_table.setColumnCount(5)
-        self.data_table.setHorizontalHeaderLabels(['日期', '品种', '权重价格', '成交量合计', '持仓量合计'])
-        self.data_table.setRowCount(len(data_items))
-        # 反序
-        data_items.reverse()
-        for row, row_item in enumerate(data_items):
-            t_item0 = QTableWidgetItem(row_item['date'])
-            t_item0.setTextAlignment(Qt.AlignCenter)
-            self.data_table.setItem(row, 0, t_item0)
-            t_item1 = QTableWidgetItem(row_item['variety_en'])
-            t_item1.setTextAlignment(Qt.AlignCenter)
-            self.data_table.setItem(row, 1, t_item1)
-            t_item2 = QTableWidgetItem(format(row_item['weight_price'], ','))
-            t_item2.setTextAlignment(Qt.AlignCenter)
-            self.data_table.setItem(row, 2, t_item2)
-            t_item3 = QTableWidgetItem(format(row_item['total_trade'], ','))
-            t_item3.setTextAlignment(Qt.AlignCenter)
-            self.data_table.setItem(row, 3, t_item3)
-            t_item4 = QTableWidgetItem(format(row_item['total_position'], ','))
-            t_item4.setTextAlignment(Qt.AlignCenter)
-            self.data_table.setItem(row, 4, t_item4)
-
-    def set_current_data_to_page(self, source_data: str, base_option: dict):
-        base_option['title'] = base_option['title'].format('权重')
-        base_option['price_name'] = '权重价格'
-        base_option['price_name_en'] = 'weight'
-        self.chart_container.set_chart_option(source_data, json.dumps(base_option))
+    pass
 
 
 # 主力指数窗口
 class DominantPriceWin(PriceIndexWin):
-    def set_current_data_to_table(self, data_items: list):
-        self.data_table.clear()
-        self.data_table.setColumnCount(5)
-        self.data_table.setHorizontalHeaderLabels(['日期', '品种', '主力价格', '成交量合计', '持仓量合计'])
-        self.data_table.setRowCount(len(data_items))
-        # 反序
-        data_items.reverse()
-        for row, row_item in enumerate(data_items):
-            t_item0 = QTableWidgetItem(row_item['date'])
-            t_item0.setTextAlignment(Qt.AlignCenter)
-            self.data_table.setItem(row, 0, t_item0)
-            t_item1 = QTableWidgetItem(row_item['variety_en'])
-            t_item1.setTextAlignment(Qt.AlignCenter)
-            self.data_table.setItem(row, 1, t_item1)
-            t_item2 = QTableWidgetItem(format(row_item['dominant_price'], ','))
-            t_item2.setTextAlignment(Qt.AlignCenter)
-            self.data_table.setItem(row, 2, t_item2)
-            t_item3 = QTableWidgetItem(format(row_item['total_trade'], ','))
-            t_item3.setTextAlignment(Qt.AlignCenter)
-            self.data_table.setItem(row, 3, t_item3)
-            t_item4 = QTableWidgetItem(format(row_item['total_position'], ','))
-            t_item4.setTextAlignment(Qt.AlignCenter)
-            self.data_table.setItem(row, 4, t_item4)
+    pass
 
-    def set_current_data_to_page(self, source_data: str, base_option: dict):
-        base_option['title'] = base_option['title'].format('主力')
-        base_option['price_name'] = '主力价格'
-        base_option['price_name_en'] = 'dominant'
-        self.chart_container.set_chart_option(source_data, json.dumps(base_option))

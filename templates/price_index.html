@@ -10,7 +10,7 @@
 </head>
 <style>
 html,body{margin:0;padding:0;background-color: rgb(235,235,235)}
-#chartBox{width: 80%;background-color: rgb(252,252,252);margin: 0 auto}
+#chartBox{width: 100%;background-color: rgb(252,252,252);margin: 0 auto}
 </style>
 <body>
     <div id="chartBox"></div>
@@ -90,6 +90,120 @@ function generateChartOption(sourceData, baseOption){
         }
     };
 }
+
+
+// 生成季节图的series, legend
+function getSeriesLegend(sourceData, baseOption) {
+    let lineTypeKey = baseOption['price_name_en'];  // 权重或是主力合约
+    let legendData = [];  // 图例数据
+    let legendSelected = {}; // 图形是否显示
+    let series = []; // 图形序列
+    let dataIndex = 1;  // 循环计数器(数据中含xAxisData,故初始=1)
+    if (lineTypeKey === 'weight'){
+        $.each(sourceData, function (dataKey, dataValues) {
+            if (dataKey === 'xAxisData'){return true}
+            legendData.push({name: dataKey, icon: 'rect'})
+            legendSelected[dataKey] = dataIndex >= Object.keys(sourceData).length - 3;  //  默认显示后3条
+            series.push({
+                name: dataKey,
+                type: 'line',
+                connectNulls: true,
+                lineStyle:{
+                    width:3,
+                },
+                symbol: 'none',
+                data: dataValues.map(item=>{return [item.date, item.weight_price]})
+            });
+            dataIndex = dataIndex + 1;
+        })
+    }else if (lineTypeKey === 'dominant'){
+        $.each(sourceData, function (dataKey, dataValues) {
+            if (dataKey === 'xAxisData'){return true}
+            legendData.push({name: dataKey, icon: 'rect'})
+            legendSelected[dataKey] = dataIndex >= Object.keys(sourceData).length - 3;  //  默认显示后3条
+            series.push({
+                name: dataKey,
+                type: 'line',
+                connectNulls: true,
+                lineStyle:{
+                    width:3,
+                },
+                symbol: 'none',
+                data: dataValues.map(item=>{return [item.date, item.dominant_price]})
+            });
+             dataIndex = dataIndex + 1;
+        })
+    }else{}
+    return [series, legendData, legendSelected]
+}
+
+
+// 生成季节图形的配置
+function generateSeasonChartOption(sourceData, baseOption){
+    let chartTitle = baseOption['title'];
+    let yAxisName = baseOption['y_axis_name'];
+    let seriesLegendData = getSeriesLegend(sourceData, baseOption);
+    return {
+        grid: {
+            bottom: 30,
+            containLabel: true
+        },
+        title:{
+            text: chartTitle,
+            textStyle: {fontSize: 22}
+        },
+        xAxis: {
+            data: sourceData['xAxisData'],
+            axisTick:{
+                interval:function (index, value) {
+                    var v = "2020/" + value.substr(0,2) + "/" + value.substr(2,2);
+                    var lastDay = new Date("2020", value.substr(0,2), 0);
+                    var date = new Date(v);
+                    if (date.getDate() == lastDay.getDate()){
+                        return true
+                    }
+                },
+                alignWithLabel:true
+            },
+            axisLabel:{
+                interval:0,
+                formatter:function (value, index) {
+                    var v = "2020/" + value.substr(0,2) + "/" + value.substr(2,2);
+                    var date = new Date(v);
+                    if (date.getDate() == 15){
+                        return (date.getMonth() + 1) + "月";
+                    }
+                    // return date.getMonth() + 1;
+                }
+            }
+        },
+        yAxis: {
+            type: 'value',
+            scale: true,
+            name: yAxisName,
+            nameLocation: 'center',
+            nameGap:55,
+            position: 'left',
+        },
+        tooltip: {
+            trigger: 'axis',
+            axisPointer: {
+                type: 'cross'
+            },
+        },
+        series: seriesLegendData[0],
+        legend:{
+            type:'scroll',
+            right:10,
+            top: 35,
+            orient: 'vertical',
+            data:seriesLegendData[1],
+            itemHeight: 2,
+            selected: seriesLegendData[2]
+        }
+    }
+}
+
 // 主入口函数
 $(function () {
     let chartObj = echarts.init(document.getElementById('chartBox'));
@@ -103,6 +217,12 @@ $(function () {
                 chartObj.clear();
                 chartObj.setOption(option, true)
             });
+            // 传入绘制季节图形
+            pageContact.seasonData.connect(function (sourceData, baseOption) {
+                let option = generateSeasonChartOption(JSON.parse(sourceData), JSON.parse(baseOption));
+                chartObj.clear();
+                chartObj.setOption(option, true);
+            })
             // 传入重置大小
             pageContact.chartResize.connect(function (cWidth, cHeight) {
                 chartObj.resize({width: cWidth, height: cHeight});

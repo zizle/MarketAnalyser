@@ -46,12 +46,25 @@ function generateChartOption(sourceData, baseOption){
             data: sourceData.map(item=>item.date),
             axisLabel: {
                 rotate: 90,
-                fontSize: 11
+                fontSize: 11,
+                color: '#333333'
+            },
+            axisLine: {
+                lineStyle: {
+                    color: '#4e6ef2'
+                }
+            },
+            axisTick:{
+                show: true,
+                lineStyle: {
+                    color: '#4e6ef2'
+                }
             }
         },
         yAxis: [
             {
                 type: "value",
+                scale: true,
                 name: "收盘价",
                 nameLocation: 'center',
                 nameGap:55,
@@ -59,6 +72,7 @@ function generateChartOption(sourceData, baseOption){
             },
             {
                 type: "value",
+                scale: true,
                 name: "净持率",
                 nameLocation: 'center',
                 nameGap: 30,

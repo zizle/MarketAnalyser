@@ -3,4 +3,4 @@
 # @Time  : 2020-11-26 15:21
 # @Author: zizle
 from .title import TitleOptionWidget
-from .web import WebChartWidget
+from .loading import LoadingCover
