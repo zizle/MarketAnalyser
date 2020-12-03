@@ -23,6 +23,7 @@ from settings import EXCHANGES, SERVER_API
 class ChartContainWidget(QWebEngineView):
     def __init__(self, web_channel, file_url, *args, **kwargs):
         super(ChartContainWidget, self).__init__(*args, **kwargs)
+        self.setAttribute(Qt.WA_DeleteOnClose, True)
         # 加载图形容器
         self.page().load(QUrl(file_url))  # 加载页面
         # 设置与页面信息交互的通道

@@ -25,6 +25,7 @@ from utils.constant import HORIZONTAL_HEADER_STYLE, VERTICAL_SCROLL_STYLE, HORIZ
 class ChartContainWidget(QWebEngineView):
     def __init__(self, web_channel, file_url, *args, **kwargs):
         super(ChartContainWidget, self).__init__(*args, **kwargs)
+        self.setAttribute(Qt.WA_DeleteOnClose, True)
         # 加载图形容器
         self.page().load(QUrl(file_url))  # 加载页面
         # 设置与页面信息交互的通道
@@ -247,6 +248,8 @@ class PriceIndexWin(QWidget):
             self.set_current_data_to_table()
             self.up_down_table.hide()
             self.data_table.show()
+            self.current_show = 'source_price'
+            self.swap_data_button.setText('季节图表')
             return
         # 非初始显示就是切换
         if self.current_show == 'source_price':
@@ -255,6 +258,7 @@ class PriceIndexWin(QWidget):
             self.data_table.hide()
             self.up_down_table.show()
             self.current_show = 'amplitude'
+            self.swap_data_button.setText('数据图表')
         elif self.current_show == 'amplitude':
             # 切换为价格数据
             self.set_current_data_to_page()
@@ -262,6 +266,7 @@ class PriceIndexWin(QWidget):
             self.data_table.show()
             self.up_down_table.hide()
             self.current_show = 'source_price'
+            self.swap_data_button.setText('季节图表')
         else:
             pass
 
@@ -403,19 +408,10 @@ class PriceIndexWin(QWidget):
         base_option['price_name_en'] = name_en
         self.chart_container.set_line_chart_option(json.dumps(source_data), json.dumps(base_option))
 
-    def swap_table(self):
-        """ 切换显示的表格 """
-        
-        self.data_table.setVisible(self.data_table.isHidden())
-        self.up_down_table.setVisible(self.up_down_table.isHidden())
-        self.unit_label.setVisible(self.unit_label.isHidden())
-        self.swap_data_button.setText('季节图表' if self.swap_data_button.text() == '数据图表' else '数据图表')
-
     def generate_season_chart(self):
         """ 生成季节图形数据作图 """
         if self.source_df is None or self.current_price_index is None:
             return
-        self.swap_table()
         # 生成需要的结果数据
         chart_source_data, up_down_data = self.calculate_season_result_data(self.source_df)
         # 数据在图形展示
