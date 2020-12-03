@@ -53,6 +53,7 @@ function generateChartOption(sourceData, baseOption){
             {
                 type: "value",
                 name: priceName,
+                scale: true,
                 nameLocation: 'center',
                 nameGap:55,
                 position:'left'
@@ -62,6 +63,12 @@ function generateChartOption(sourceData, baseOption){
             trigger: 'axis',
             axisPointer: {
                 type: 'cross',
+            }
+        },
+        toolbox:{
+            feature:{
+                dataZoom:{},
+                dataView:{},
             }
         },
         series: [
@@ -144,6 +151,8 @@ function generateSeasonChartOption(sourceData, baseOption){
     let yAxisName = baseOption['y_axis_name'];
     let seriesLegendData = getSeriesLegend(sourceData, baseOption);
     return {
+        color: ['#194f97','#555555','#bd6b08','#00686b','#c82d31','#625ba1','#898989','#9c9800','#007f54','#a195c5',
+            '#103667','#f19272'],
         grid: {
             bottom: 30,
             containLabel: true
@@ -226,6 +235,10 @@ $(function () {
             // 传入重置大小
             pageContact.chartResize.connect(function (cWidth, cHeight) {
                 chartObj.resize({width: cWidth, height: cHeight});
+            });
+            // 清除图形
+            pageContact.clearChart.connect(function () {
+                chartObj.clear();
             })
         }
     );

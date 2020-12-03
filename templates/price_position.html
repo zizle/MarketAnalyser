@@ -147,6 +147,10 @@ $(function () {
             // 传入重置大小
             pageContact.chartResize.connect(function (cWidth, cHeight) {
                 chartObj.resize({width: cWidth, height: cHeight});
+            });
+            // 清除图形
+            pageContact.clearChart.connect(function () {
+                chartObj.clear();
             })
         }
     );

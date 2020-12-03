@@ -44,6 +44,9 @@ class ChartContainWidget(QWebEngineView):
     def resize_chart(self):
         self.contact_channel.chartResize.emit(self.width() * 0.8, self.height())
 
+    def clear_chart(self):
+        self.contact_channel.clearChart.emit()
+
 
 class PricePositionWin(QWidget):
     """ 价格净持仓窗口 """
@@ -94,7 +97,7 @@ class PricePositionWin(QWidget):
         self.loading_cover.resize(self.parent().width(), self.parent().height())
 
         # 图形区
-        self.loading_cover.show(text='加载资源中')
+        self.loading_cover.show(text='正在加载资源')
         self.chart_container = ChartContainWidget(ChartSourceChannel(), 'file:/templates/price_position.html', self)
         self.chart_container.page().loadFinished.connect(self.page_load_finished)
         splitter.addWidget(self.chart_container)
@@ -128,7 +131,7 @@ class PricePositionWin(QWidget):
         self.data_table.setObjectName('dataTable')
         self.setStyleSheet(
             "#dataTable{selection-color:rgb(80,100,200);selection-background-color:rgb(220,220,220);"
-            "alternate-background-color:rgb(245,250,248);gridline-color:rgb(60,60,60)}"
+            "alternate-background-color:rgb(230,254,238);gridline-color:rgb(60,60,60)}"
         )
         # 设置表头,表滚动条样式
         self.data_table.horizontalHeader().setStyleSheet(HORIZONTAL_HEADER_STYLE)
@@ -159,14 +162,33 @@ class PricePositionWin(QWidget):
         super(PricePositionWin, self).resizeEvent(event)
         self.loading_cover.resize(self.parent().width(), self.parent().height())
 
+    def clear_contents(self):
+        """ 清除图形和表格 """
+        self.chart_container.clear_chart()
+        self.data_table.clearContents()
+        self.data_table.setRowCount(0)
+
+    def show_loading(self, show_text):
+        """ 显示正在请求数据 """
+        # 请求数据
+        self.loading_cover.show(text=show_text)
+        self.analysis_button.setEnabled(False)
+        self.export_button.setEnabled(False)
+        self.clear_contents()
+
+    def loading_finished(self):
+        """ 请求数据结束 """
+        self.loading_cover.hide()
+        self.analysis_button.setEnabled(True)
+
     def page_load_finished(self):
         """ 页面加载完成 """
-        self.loading_cover.hide()
+        # self.loading_cover.hide()
+        pass
 
     def get_variety_with_exchange(self):
         """ 获取交易所下的所有品种 """
-        # 请求数据
-        self.loading_cover.show(text='正在获取品种')
+        self.show_loading("正在获取品种")
         url = SERVER_API + 'exchange-variety/?is_real=1&exchange={}'.format(self.exchange_combobox.currentData())
         reply = self.network_manager.get(QNetworkRequest(QUrl(url)))
         reply.finished.connect(self.exchange_variety_reply)
@@ -180,7 +202,6 @@ class PricePositionWin(QWidget):
             data = json.loads(reply.readAll().data().decode('utf8'))
             self.set_current_variety(data['varieties'])
         reply.deleteLater()
-        self.loading_cover.hide()
 
     def set_current_variety(self, varieties: list):
         """ 设置当前的品种 """
@@ -192,7 +213,7 @@ class PricePositionWin(QWidget):
         """ 根据品种获取全部合约 """
         if not self.variety_combobox.currentData():
             return
-        self.loading_cover.show('正在获取合约')
+        self.show_loading('正在获取合约')
         url = SERVER_API + 'price-position-contracts/?variety_en={}'.format(self.variety_combobox.currentData())
         reply = self.network_manager.get(QNetworkRequest(QUrl(url)))
         reply.finished.connect(self.variety_contracts_reply)
@@ -206,7 +227,6 @@ class PricePositionWin(QWidget):
             data = json.loads(reply.readAll().data().decode('utf8'))
             self.set_current_contract(data['contracts'])
         reply.deleteLater()
-        self.loading_cover.hide()
 
     def set_current_contract(self, contracts: list):
         self.contract_combobox.clear()
@@ -217,7 +237,7 @@ class PricePositionWin(QWidget):
         """ 根据合约获取时间范围 """
         if not self.contract_combobox.currentText():
             return
-        self.loading_cover.show(text='正在获取日期范围')
+        self.show_loading('正在获取日期范围')
         url = SERVER_API + 'price-position-dates/?contract={}'.format(self.contract_combobox.currentText())
         reply = self.network_manager.get(QNetworkRequest(QUrl(url)))
         reply.finished.connect(self.min_max_date_reply)
@@ -232,7 +252,7 @@ class PricePositionWin(QWidget):
             min_max_date = data["dates"]
             self.set_min_and_max_date(min_max_date['min_date'], min_max_date['max_date'])
         reply.deleteLater()
-        self.loading_cover.hide()
+        self.loading_finished()  # 加载数据结束
 
     def set_min_and_max_date(self, min_date: int, max_date: int):
         """ 设置最大最小日期 """
@@ -254,7 +274,7 @@ class PricePositionWin(QWidget):
         if not self.contract_combobox.currentText():
             QMessageBox.information(self, '错误', '请先选择合约后再操作.')
             return
-        self.loading_cover.show('正在获取资源数据')
+        self.show_loading('正在获取资源数据')
         min_date = int(datetime.datetime.strptime(self.start_date.text(), '%Y-%m-%d').timestamp())
         max_date = int(datetime.datetime.strptime(self.end_date.text(), '%Y-%m-%d').timestamp())
         url = SERVER_API + 'price-position/?contract={}&min_date={}&max_date={}'.format(
@@ -278,7 +298,7 @@ class PricePositionWin(QWidget):
             }
             self.set_current_chart_to_page(json.dumps(data['data']), json.dumps(base_option))
         reply.deleteLater()
-        self.loading_cover.hide()
+        self.loading_finished()
 
     def set_current_data_to_table(self, data_items: list):
         """ 将数据在表格显示 """

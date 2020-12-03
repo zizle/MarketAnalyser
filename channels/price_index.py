@@ -13,5 +13,7 @@ class PriceIndexChannel(QObject):
     seasonData = pyqtSignal(str, str)  # 季节数据
     # 参数1: 图形宽度; 参数2: 图形高度
     chartResize = pyqtSignal(int, int)
+    # 清除图形
+    clearChart = pyqtSignal()
 
 

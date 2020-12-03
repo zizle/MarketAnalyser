@@ -50,6 +50,9 @@ class ChartContainWidget(QWebEngineView):
     def resize_chart(self):
         self.contact_channel.chartResize.emit(self.width(), self.height())
 
+    def clear_chart(self):
+        self.contact_channel.clearChart.emit()
+
 
 class PriceIndexWin(QWidget):
     """ 价格指数窗口 """
@@ -100,7 +103,7 @@ class PriceIndexWin(QWidget):
         self.loading_cover.resize(self.parent().width(), self.parent().height())
 
         # 图形区
-        self.loading_cover.show(text='加载资源中')
+        self.loading_cover.show(text='正在加载资源')
         self.chart_container = ChartContainWidget(PriceIndexChannel(), 'file:/templates/price_index.html', self)
         self.chart_container.page().loadFinished.connect(self.page_load_finished)
         self.splitter.addWidget(self.chart_container)
@@ -166,7 +169,7 @@ class PriceIndexWin(QWidget):
         self.up_down_table.setObjectName('upDownTable')
         self.setStyleSheet(
             "#dataTable{selection-color:rgb(80,100,200);selection-background-color:rgb(220,220,220);"
-            "alternate-background-color:rgb(245,250,248);gridline-color:rgb(60,60,60)}"
+            "alternate-background-color:rgb(230,254,238);gridline-color:rgb(60,60,60)}"
             "#upDownTable{selection-color:rgb(252,252,252);selection-background-color:rgb(33,66,131);"
             "gridline-color:rgb(60,60,60)}"
         )
@@ -198,7 +201,31 @@ class PriceIndexWin(QWidget):
         self.loading_cover.resize(self.parent().width(), self.parent().height())
 
     def page_load_finished(self):
+        # self.loading_cover.hide()
+        pass
+
+    def clear_contents(self):
+        """ 清除图形和表格 """
+        self.chart_container.clear_chart()
+        self.data_table.clearContents()
+        self.data_table.setRowCount(0)
+        self.up_down_table.clear()
+        self.up_down_table.setRowCount(0)
+        self.up_down_table.setColumnCount(0)
+
+    def show_loading(self, show_text):
+        """ 显示正在请求数据 """
+        # 请求数据
+        self.loading_cover.show(text=show_text)
+        self.analysis_button.setEnabled(False)
+        self.swap_data_button.setEnabled(False)
+        self.export_button.setEnabled(False)
+        self.clear_contents()
+
+    def loading_finished(self):
+        """ 请求数据结束 """
         self.loading_cover.hide()
+        self.analysis_button.setEnabled(True)
 
     def set_current_price_index(self, index_type: str):
         """ 设置当前窗口类型 """
@@ -240,7 +267,7 @@ class PriceIndexWin(QWidget):
 
     def get_variety_with_exchange(self):
         """ 获取交易所下的所有品种 """
-        self.loading_cover.show(text='正在获取品种')
+        self.show_loading('正在获取品种')
         url = SERVER_API + 'exchange-variety/?is_real=1&exchange={}'.format(self.exchange_combobox.currentData())
         reply = self.network_manager.get(QNetworkRequest(QUrl(url)))
         reply.finished.connect(self.exchange_variety_reply)
@@ -254,7 +281,6 @@ class PriceIndexWin(QWidget):
             data = json.loads(reply.readAll().data().decode('utf8'))
             self.set_current_variety(data['varieties'])
         reply.deleteLater()
-        self.loading_cover.hide()
 
     def set_current_variety(self, varieties: list):
         """ 设置当前的品种 """
@@ -266,7 +292,7 @@ class PriceIndexWin(QWidget):
         """ 根据品种获取最大最小时间 """
         if not self.variety_combobox.currentData():
             return
-        self.loading_cover.show(text='正在获取日期范围')
+        self.show_loading('正在获取日期范围')
         url = SERVER_API + 'price-index-dates/?variety_en={}'.format(self.variety_combobox.currentData())
         reply = self.network_manager.get(QNetworkRequest(QUrl(url)))
         reply.finished.connect(self.min_max_date_reply)
@@ -280,7 +306,7 @@ class PriceIndexWin(QWidget):
             min_max_date = data["dates"]
             self.set_min_and_max_dates(min_max_date['min_date'], min_max_date['max_date'])
         reply.deleteLater()
-        self.loading_cover.hide()
+        self.loading_finished()
 
     def set_min_and_max_dates(self, min_date: int, max_date: int):
         """ 设置最大最小日期 """
@@ -296,8 +322,6 @@ class PriceIndexWin(QWidget):
         self.start_date.setDate(q_min_date)
         self.end_date.setDateRange(q_min_date, q_max_date)
         self.end_date.setDate(q_max_date)
-        self.analysis_button.setEnabled(True)
-        self.swap_data_button.setEnabled(True)
 
     def get_price_index_data(self):
         """ 获取价格指数数据 """
@@ -307,7 +331,7 @@ class PriceIndexWin(QWidget):
         if self.source_df is not None:
             del self.source_df
             self.source_df = None
-        self.loading_cover.show(text='正在获取数据资源')
+        self.show_loading('正在获取数据资源')
         # 获取条件
         min_date = int(datetime.datetime.strptime(self.start_date.text(), '%Y-%m-%d').timestamp())
         max_date = int(datetime.datetime.strptime(self.end_date.text(), '%Y-%m-%d').timestamp())
@@ -333,7 +357,7 @@ class PriceIndexWin(QWidget):
             # 开放导出数据
             self.export_button.setEnabled(True)
         reply.deleteLater()
-        self.loading_cover.hide()
+        self.loading_finished()
 
     def set_current_data_to_table(self):
         if self.source_df is None:

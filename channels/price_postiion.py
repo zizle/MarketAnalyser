@@ -10,3 +10,5 @@ class ChartSourceChannel(QObject):
     chartSource = pyqtSignal(str, str)
     # 参数1: 图形宽度; 参数2: 图形高度
     chartResize = pyqtSignal(int, int)
+    # 清除图形
+    clearChart = pyqtSignal()
