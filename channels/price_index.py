@@ -11,6 +11,7 @@ class PriceIndexChannel(QObject):
     # 参数1：作图的源数据; 参数2: 基本配置信息
     lineData = pyqtSignal(str, str)   # 普通数据
     seasonData = pyqtSignal(str, str)  # 季节数据
+    spaceData = pyqtSignal(str, str)  # 区间带数据
     # 参数1: 图形宽度; 参数2: 图形高度
     chartResize = pyqtSignal(int, int)
     # 清除图形

@@ -213,6 +213,101 @@ function generateSeasonChartOption(sourceData, baseOption){
     }
 }
 
+
+// 生成指数区间图形配置
+function generateSpaceCharOption(sourceData, baseOption){
+  return {
+    title: {
+        text: baseOption.title
+    },
+    tooltip: {
+        trigger: 'axis',
+        axisPointer: {
+            type: 'cross',
+            label: {
+                backgroundColor: '#6a7985'
+            }
+        },
+        formatter: function(params,ticket,callback){
+            let space = '&nbsp;&nbsp;&nbsp;&nbsp;'
+            let maxVaule = parseFloat(params[0].value) + parseFloat(params[1].value)
+            let str = params[0].axisValue + '<br>'
+            str += params[0].seriesName + space +  params[0].value.toFixed(2) + '<br>'
+            str += params[1].seriesName + space +  maxVaule.toFixed(2) + '<br>'
+            str += params[2].seriesName + space +  params[2].value.toFixed(2) + '<br>'
+            str += params[3].seriesName
+            if (params[3].value == '-'){str += space +  params[3].value
+            }else{str += space +  params[3].value.toFixed(2)}
+            return str
+        }
+    },
+    legend: {
+        data: ['Min', 'Max', 'Avg', 'CUR']
+    },
+    // toolbox: {
+    //     feature: {
+    //         saveAsImage: {}
+    //     }
+    // },
+    grid: {
+        left: '3%',
+        right: '4%',
+        bottom: '3%',
+        containLabel: true
+    },
+    xAxis: [
+        {
+            type: 'category',
+            boundaryGap: false,
+            // axisLabel: {
+            //   showMaxLabel: true
+            // },
+            data: sourceData.map(item => item.month_date)
+        }
+    ],
+    yAxis: [
+        {
+            type: 'value',
+            scale: true
+        }
+    ],
+    series: [
+      {
+          name: 'Min',
+          type: 'line',
+          stack: 'total',
+          data: sourceData.map(item => item.min),
+          color: '#aaa',
+          symbol: 'none'
+          
+      },
+      {
+          name: 'Max',
+          type: 'line',
+          stack: 'total',
+          areaStyle: {color: '#ddd'},
+          // [200, 232, 150, 160, 110, 255, 300]
+          data: sourceData.map(item => {return (item.max - item.min).toFixed(2)}),
+          color: '#aaa',
+          symbol: 'none'
+          
+      },
+      {
+          name: 'Avg',
+          type: 'line',
+          data: sourceData.map(item => item.mean),
+          symbol: 'none'
+      },
+      {
+          name: 'CUR',
+          type: 'line',
+          data: sourceData.map(item => item.close_price),
+          symbol: 'none'
+      }
+    ]
+  }
+}
+
 // 主入口函数
 $(function () {
     let chartObj = echarts.init(document.getElementById('chartBox'));
@@ -231,6 +326,12 @@ $(function () {
                 let option = generateSeasonChartOption(JSON.parse(sourceData), JSON.parse(baseOption));
                 chartObj.clear();
                 chartObj.setOption(option, true);
+            })
+            // 传入区间带绘图数据
+            pageContact.spaceData.connect(function (sourceData, baseOption) {
+              let option = generateSpaceCharOption(JSON.parse(sourceData), JSON.parse(baseOption));
+              chartObj.clear();
+              chartObj.setOption(option, true)
             })
             // 传入重置大小
             pageContact.chartResize.connect(function (cWidth, cHeight) {

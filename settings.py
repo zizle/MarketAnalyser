@@ -7,10 +7,11 @@ import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# SERVER_API = 'http://127.0.0.1:8000/api/'
-SERVER_API = "http://210.13.218.130:9004/api/"
+SERVER_API = 'http://127.0.0.1:8000/api/'
+SERVER_2_0 = 'http://127.0.0.1:5000/api/'
+# SERVER_API = "http://210.13.218.130:9004/api/"
 
-WINDOW_TITLE = '行情分析助手(网络版1.0)'
+WINDOW_TITLE = '行情分析助手(网络版1.1)'
 
 SYSTEM_MENUS = [
     {'id': 1, 'name': '功能选择', 'icon': '', 'children': [
