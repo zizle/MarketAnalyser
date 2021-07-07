@@ -8,7 +8,8 @@ import datetime
 import json
 import pandas as pd
 from PyQt5.QtWidgets import (qApp, QWidget, QHBoxLayout, QVBoxLayout, QLabel, QComboBox, QDateEdit, QPushButton,
-                             QSplitter, QTableWidget, QHeaderView, QTableWidgetItem, QAbstractItemView, QFileDialog)
+                             QSplitter, QTableWidget, QHeaderView, QTableWidgetItem, QAbstractItemView, QFileDialog,
+                             QSpinBox, QMessageBox)
 from PyQt5.QtCore import Qt, QMargins, QUrl, QDate
 from PyQt5.QtGui import QColor, QBrush, QFont
 from PyQt5.QtNetwork import QNetworkRequest
@@ -119,12 +120,27 @@ class PriceIndexWin(QWidget):
         table_layout.setContentsMargins(QMargins(0, 0, 0, 0))
         table_option_layout = QHBoxLayout()
         # 近x年的指数涨跌幅度显示
-        self.last_year_count = QComboBox(self)
+        table_option_layout.addWidget(QLabel('分析年度:', self))
+        cur_year = QDate.currentDate().year()
+        self.start_year = QSpinBox(self)
+        self.start_year.setMinimum(2003)
+        self.start_year.setMaximum(2050)
+        self.start_year.setSuffix('年')
+        self.start_year.setValue(cur_year - 3)
+        table_option_layout.addWidget(self.start_year)
+        table_option_layout.addWidget(QLabel('至', self))
+
+        self.end_year = QSpinBox(self)
+        self.end_year.setMinimum(2003)
+        self.end_year.setMaximum(2050)
+        self.end_year.setSuffix('年')
+        self.end_year.setValue(cur_year)
+        table_option_layout.addWidget(self.end_year)
+
         self.index_updown_button = QPushButton('指数分析', self)
-        table_option_layout.addWidget(self.last_year_count)
         table_option_layout.addWidget(self.index_updown_button)
         # 全品种的涨跌振幅
-        self.all_updown = QPushButton('近年涨幅', self)
+        self.all_updown = QPushButton('年度涨跌', self)
         table_option_layout.addWidget(self.all_updown)
 
         # 指定月份涨跌振幅
@@ -133,7 +149,7 @@ class PriceIndexWin(QWidget):
         self.pointer_month.setDisplayFormat('yyyy-MM')
         self.pointer_month.setCalendarPopup(True)
         table_option_layout.addWidget(self.pointer_month)
-        self.month_updown = QPushButton('月份涨幅', self)
+        self.month_updown = QPushButton('月度涨跌', self)
         table_option_layout.addWidget(self.month_updown)
 
         table_option_layout.addStretch()
@@ -218,10 +234,6 @@ class PriceIndexWin(QWidget):
         self.swap_data_button.clicked.connect(self.swap_data_show_style)
         # 导出数据信号
         self.export_button.clicked.connect(self.export_result_to_excel)
-        # 添加近x年的选项
-        for item in [{'count': 2, 'text': '近2年'}, {'count': 3, 'text': '近3年'},
-                     {'count': 5, 'text': '近5年'}, {'count': 10, 'text': '近10年'}]:
-            self.last_year_count.addItem(item['text'], item['count'])
         # 点击指数分析
         self.index_updown_button.clicked.connect(self.to_analysis_price)  # 指数分析,即区间带分析
         # 点击全品种涨跌幅
@@ -309,8 +321,11 @@ class PriceIndexWin(QWidget):
         # self.export_button.setEnabled(True)
 
     def to_get_all_variety_updown(self):
-        end_year = datetime.datetime.today().year
-        start_year = end_year - self.last_year_count.currentData()
+        start_year = self.start_year.value()
+        end_year = self.end_year.value()
+        if start_year >= end_year:
+            QMessageBox.critical(self, '错误', '起始年份需小于结束年份!')
+            return
         url = SERVER_2_0 + 'dsas/mquotes/year/updown/' + f'?ys={start_year}&ye={end_year}'
         reply = self.network_manager.get(QNetworkRequest(QUrl(url)))
         reply.finished.connect(self.all_variety_updown_reply)
@@ -429,8 +444,13 @@ class PriceIndexWin(QWidget):
         return pos_row, pos_column
 
     def to_analysis_price(self):
-        url = SERVER_2_0 + 'dsas/mquotes/space/?year_count={}&variety={}'.format(
-            self.last_year_count.currentData(), self.variety_combobox.currentData()
+        start_year = self.start_year.value()
+        end_year = self.end_year.value()
+        if start_year >= end_year:
+            QMessageBox.critical(self, '错误', '起始年份需小于结束年份!')
+            return
+        url = SERVER_2_0 + 'dsas/mquotes/year/extreme/?ys={}&ye={}&variety={}'.format(
+            start_year, end_year, self.variety_combobox.currentData()
         )
         reply = self.network_manager.get(QNetworkRequest(QUrl(url)))
         reply.finished.connect(self.price_analysis_reply)
@@ -487,11 +507,9 @@ class PriceIndexWin(QWidget):
 
     def hide_price_analysis(self):  # 隐藏指数分析功能
         if self.current_price_index == 'weight':
-            self.last_year_count.hide()
             self.index_updown_button.hide()
             self.all_updown.hide()
         elif self.current_price_index == 'dominant':
-            self.last_year_count.show()
             self.index_updown_button.show()
             self.all_updown.show()
         else:
