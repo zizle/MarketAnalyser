@@ -6,6 +6,7 @@
 import json
 import datetime
 import pandas as pd
+from itertools import groupby
 from PyQt5.QtWidgets import (qApp, QWidget, QHBoxLayout, QVBoxLayout, QTableWidgetItem, QLabel, QSplitter, QTableWidget,
                              QComboBox, QDateEdit, QPushButton, QHeaderView, QMessageBox, QAbstractItemView,
                              QFileDialog)
@@ -17,7 +18,7 @@ from utils.logger import logger
 from utils.constant import HORIZONTAL_HEADER_STYLE, HORIZONTAL_SCROLL_STYLE, VERTICAL_SCROLL_STYLE
 from channels.price_postiion import ChartSourceChannel
 from widgets import TitleOptionWidget, LoadingCover
-from settings import EXCHANGES, SERVER_API
+from settings import EXCHANGES, SERVER_API, SERVER_2_0
 
 
 class ChartContainWidget(QWebEngineView):
@@ -142,7 +143,7 @@ class PricePositionWin(QWidget):
         self.setLayout(layout)
 
         """ 业务逻辑部分 """
-
+        self.query_type = 'contract'  # 当前查询的数据类型
         # 网管器
         self.network_manager = getattr(qApp, 'network')
         # 关联交易所变化信号
@@ -231,6 +232,11 @@ class PricePositionWin(QWidget):
 
     def set_current_contract(self, contracts: list):
         self.contract_combobox.clear()
+        # 将第一个合约进行英文与数字的分离
+        if len(contracts) > 0:
+            variety = [''.join(list(g)) for k, g in groupby(contracts[0]['contract'], key=lambda x: x.isdigit())]
+            v = variety[0] if len(variety[0]) <= 2 else variety[0][:2]
+            self.contract_combobox.addItem(v)
         for contract_item in contracts:
             self.contract_combobox.addItem(contract_item['contract'])
 
@@ -238,10 +244,20 @@ class PricePositionWin(QWidget):
         """ 根据合约获取时间范围 """
         if not self.contract_combobox.currentText():
             return
-        self.show_loading('正在获取日期范围')
-        url = SERVER_API + 'price-position-dates/?contract={}'.format(self.contract_combobox.currentText())
-        reply = self.network_manager.get(QNetworkRequest(QUrl(url)))
-        reply.finished.connect(self.min_max_date_reply)
+        current_contract = self.contract_combobox.currentText()
+        split_list = [''.join(list(g)) for k, g in groupby(current_contract, key=lambda x: x.isdigit())]
+        if len(split_list) > 1:  # 查询的是合约
+            self.query_type = 'contract'
+            self.show_loading('正在获取日期范围')
+            url = SERVER_API + 'price-position-dates/?contract={}'.format(self.contract_combobox.currentText())
+            reply = self.network_manager.get(QNetworkRequest(QUrl(url)))
+            reply.finished.connect(self.min_max_date_reply)
+        else:  # 查询的是品种
+            max_date = int(datetime.datetime.strptime(datetime.datetime.today().strftime('%Y-%m-%d'), '%Y-%m-%d').timestamp())
+            min_date = int(datetime.datetime.strptime(str(datetime.datetime.today().year - 3), '%Y').timestamp())
+            self.set_min_and_max_date(min_date, max_date)
+            self.query_type = 'variety'
+            self.loading_finished()  # 加载数据结束
 
     def min_max_date_reply(self):
         """ 日期值返回 """
@@ -278,9 +294,16 @@ class PricePositionWin(QWidget):
         self.show_loading('正在获取资源数据')
         min_date = int(datetime.datetime.strptime(self.start_date.text(), '%Y-%m-%d').timestamp())
         max_date = int(datetime.datetime.strptime(self.end_date.text(), '%Y-%m-%d').timestamp())
-        url = SERVER_API + 'price-position/?contract={}&min_date={}&max_date={}'.format(
-            self.contract_combobox.currentText(), min_date, max_date
-        )
+        if self.query_type == 'contract':
+            url = SERVER_API + 'price-position/?contract={}&min_date={}&max_date={}'.format(
+                self.contract_combobox.currentText(), min_date, max_date
+            )
+        elif self.query_type == 'variety':
+            url = SERVER_2_0 + 'dsas/price-position/?ds={}&de={}&v={}'.format(
+                self.start_date.text(), self.end_date.text(), self.contract_combobox.currentText()
+            )
+        else:
+            return
         reply = self.network_manager.get(QNetworkRequest(QUrl(url)))
         reply.finished.connect(self.price_position_reply)
 
@@ -291,6 +314,18 @@ class PricePositionWin(QWidget):
             logger.error("GET PRICE-POSITION DATA ERROR. STATUS:{}".format(reply.error()))
         else:
             data = json.loads(reply.readAll().data().decode('utf8'))
+            if self.query_type == 'variety':
+                # 处理数据,由于新版接口与旧版不一致
+                for item in data['data']:
+                    item['date'] = item['quotes_date'].replace('-', '')
+                    item['contract'] = item['variety_en']
+                    item['empty_volume'] = float(item['position_volume'].replace(',', ''))
+                    item['long_position'] = float(item['long_position'].replace(',', ''))
+                    item['short_position'] = float(item['short_position'].replace(',', ''))
+                    del item['quotes_ts']
+                    del item['position_volume']
+                    del item['net_position']
+                    del item['quotes_date']
             self.set_current_data_to_table(data['data'].copy())  # 数据在表格展示
             self.export_button.setEnabled(True)
             # 组合基本配置信息和源数据传递到页面

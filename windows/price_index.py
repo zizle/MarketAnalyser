@@ -6,10 +6,12 @@
 
 import datetime
 import json
+import time
+
 import pandas as pd
 from PyQt5.QtWidgets import (qApp, QWidget, QHBoxLayout, QVBoxLayout, QLabel, QComboBox, QDateEdit, QPushButton,
                              QSplitter, QTableWidget, QHeaderView, QTableWidgetItem, QAbstractItemView, QFileDialog,
-                             QSpinBox, QMessageBox)
+                             QSpinBox, QMessageBox, QFrame)
 from PyQt5.QtCore import Qt, QMargins, QUrl, QDate
 from PyQt5.QtGui import QColor, QBrush, QFont
 from PyQt5.QtNetwork import QNetworkRequest
@@ -143,11 +145,16 @@ class PriceIndexWin(QWidget):
         self.all_updown = QPushButton('年度涨跌', self)
         table_option_layout.addWidget(self.all_updown)
 
+        # 分割线
+        sep_line = QFrame(self)
+        sep_line.setFrameShape(QFrame.VLine)
+        sep_line.setFrameShadow(QFrame.Sunken)
+        table_option_layout.addWidget(sep_line)
         # 指定月份涨跌振幅
-        self.pointer_month = QDateEdit(self)
-        self.pointer_month.setDate(QDate.currentDate())
-        self.pointer_month.setDisplayFormat('yyyy-MM')
-        self.pointer_month.setCalendarPopup(True)
+        self.pointer_month = QSpinBox(self)
+        self.pointer_month.setSuffix('月')
+        self.pointer_month.setMinimum(1)
+        self.pointer_month.setMaximum(12)
         table_option_layout.addWidget(self.pointer_month)
         self.month_updown = QPushButton('月度涨跌', self)
         table_option_layout.addWidget(self.month_updown)
@@ -242,10 +249,12 @@ class PriceIndexWin(QWidget):
         self.month_updown.clicked.connect(self.to_get_month_updown)  # 查询全品种指定月份的涨跌振幅数据
 
     def to_get_month_updown(self):
-        cur_date = datetime.datetime.strptime(self.pointer_month.text(), '%Y-%m').strftime('%Y-%m-%d')
-        url = SERVER_2_0 + 'dsas/mquotes/month/updown/' + f'?date={cur_date}'
+        current_month = self.pointer_month.value()
+
+        url = SERVER_2_0 + 'dsas/iprice/month/updown/' + f'?month={current_month}&pt={self.current_price_index}'
         reply = self.network_manager.get(QNetworkRequest(QUrl(url)))
         reply.finished.connect(self.month_varieties_updown_reply)
+        self.loading_cover.show('正在请求数据')
 
     def month_varieties_updown_reply(self):
         reply = self.sender()
@@ -254,6 +263,7 @@ class PriceIndexWin(QWidget):
         else:
             data = json.loads(reply.readAll().data().decode('utf8'))
             self.table_show_month_varieties_updown(data.get('data', []))
+            self.loading_cover.hide()
 
     def table_show_month_varieties_updown(self, data):  # 显示月涨跌波幅
         # 填前2行表头
@@ -261,9 +271,9 @@ class PriceIndexWin(QWidget):
         # 填写涨跌幅表格的数据
         self.up_down_table.clear()
         self.up_down_table.setRowCount(2)
-        col_count = 2 * len(month_list) + 1
+        col_count = 2 * len(month_list) + 1  # +1为品种列
         self.up_down_table.setColumnCount(col_count)
-        self.up_down_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.up_down_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         variety_name = QTableWidgetItem('品种')
         variety_name.setTextAlignment(Qt.AlignCenter)
         self.up_down_table.setItem(0, 0, variety_name)
@@ -297,38 +307,86 @@ class PriceIndexWin(QWidget):
             self.up_down_table.setItem(cur_row, 0, v_item)
 
         # 填数据
-        for variety_item in data:
-            # 获取该item应该填的的起始行和列
-            pos_row, pos_column = self.get_up_down_month_pos(variety_item['variety_en'], variety_item['month'])
-            zd = variety_item['zd']
-            zd_item = QTableWidgetItem(zd if zd == '-' else '%.2f%%' % (zd * 100))
-            zd_item.setTextAlignment(Qt.AlignCenter)
-            if zd != '-' and zd < 0:
-                zd_item.setBackground(QBrush(QColor(20, 188, 80)))
-                zd_item.setForeground(QBrush(QColor(255, 255, 255)))
-            elif zd != '-' and zd > 0:
-                zd_item.setBackground(QBrush(QColor(216, 40, 46)))
-                zd_item.setForeground(QBrush(QColor(255, 255, 255)))
-            self.up_down_table.setItem(pos_row, pos_column, zd_item)
-            zf = variety_item['zf']
-            zf_item = QTableWidgetItem(zf if zf == '-' else '%.2f%%' % (zf * 100))
-            zf_item.setTextAlignment(Qt.AlignCenter)
-            self.up_down_table.setItem(pos_row, pos_column + 1, zf_item)
+        # 增加计涨计跌的显示格
+        self.up_down_table.insertColumn(col_count)
+        self.up_down_table.insertColumn(col_count + 1)
+        self.up_down_table.setSpan(0, col_count, 1, 2)
+        count_header = QTableWidgetItem('数量')
+        count_header.setTextAlignment(Qt.AlignCenter)
+        self.up_down_table.setItem(0, col_count, count_header)
+        counter_up = QTableWidgetItem('计涨')
+        counter_up.setTextAlignment(Qt.AlignCenter)
+        self.up_down_table.setItem(1, col_count, counter_up)
+        counter_down = QTableWidgetItem('计跌')
+        counter_down.setTextAlignment(Qt.AlignCenter)
+        self.up_down_table.setItem(1, col_count+1, counter_down)
+
+        row_count = self.up_down_table.rowCount()
+        for row in range(2, row_count):
+            up, down = 0, 0  # 计涨计跌数
+            for col in range(1, col_count, 2):
+                v_item = self.up_down_table.item(row, 0)
+                dat_item = self.up_down_table.item(1, col)
+                show_data = dat_item.data(Qt.UserRole)
+                # 获取这行这列的数据
+                src_item = self.get_month_updown_obj(data, v_item.text(), show_data['month'])
+                if not src_item:
+                    continue
+                # 填数据
+                zd, zf = src_item['zd'], src_item['zf']
+                zd_str = str(zd) if zd == '-' else '%.2f%%' % (zd * 100)
+                zf_str = str(zf) if zf == '-' else '%.2f%%' % (zf * 100)
+
+                zd_item = QTableWidgetItem(zd_str)
+                zd_item.setTextAlignment(Qt.AlignCenter)
+                zd_item.setToolTip(f'{src_item["month"]}({src_item["variety_en"]})涨跌:{zd_str}')
+                self.up_down_table.setItem(row, col, zd_item)
+                zf_item = QTableWidgetItem(zf_str)
+                zf_item.setTextAlignment(Qt.AlignCenter)
+                zf_item.setToolTip(f'{src_item["month"]}({src_item["variety_en"]})波幅:{zf_str}')
+                self.up_down_table.setItem(row, col + 1, zf_item)
+
+                if zd != '-':
+                    if zd > 0:
+                        up += 1
+                        zd_item.setBackground(QBrush(QColor(216, 40, 46)))
+                        zd_item.setForeground(QBrush(QColor(255, 255, 255)))
+                    else:
+                        down += 1
+                        zd_item.setBackground(QBrush(QColor(20, 188, 80)))
+                        zd_item.setForeground(QBrush(QColor(255, 255, 255)))
+
+            up_item = QTableWidgetItem(str(up))
+            up_item.setTextAlignment(Qt.AlignCenter)
+            up_item.setToolTip(f'计涨{up}个')
+            self.up_down_table.setItem(row, col_count, up_item)
+            down_item = QTableWidgetItem(str(down))
+            down_item.setTextAlignment(Qt.AlignCenter)
+            down_item.setToolTip(f'计跌{down}个')
+            self.up_down_table.setItem(row, col_count+ 1, down_item)
 
         # 显示表格
         self.up_down_table.show()
         self.data_table.hide()
         # self.export_button.setEnabled(True)
 
+    def get_month_updown_obj(self, source, variety, month):
+        for item in source:
+            if item['variety_en'] == variety and item['month'] == month:
+                return item
+        return None
+
     def to_get_all_variety_updown(self):
+        self.export_button.setEnabled(False)
         start_year = self.start_year.value()
         end_year = self.end_year.value()
         if start_year >= end_year:
             QMessageBox.critical(self, '错误', '起始年份需小于结束年份!')
             return
-        url = SERVER_2_0 + 'dsas/mquotes/year/updown/' + f'?ys={start_year}&ye={end_year}'
+        url = SERVER_2_0 + 'dsas/iprice/year/updown/' + f'?ys={start_year}&ye={end_year}&pt={self.current_price_index}'
         reply = self.network_manager.get(QNetworkRequest(QUrl(url)))
         reply.finished.connect(self.all_variety_updown_reply)
+        self.loading_cover.show(text='正在请求数据...')
 
     def all_variety_updown_reply(self):
         reply = self.sender()
@@ -346,7 +404,7 @@ class PriceIndexWin(QWidget):
         self.up_down_table.setRowCount(2)
         col_count = 2 * len(year_list) + 1
         self.up_down_table.setColumnCount(col_count)
-        self.up_down_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.up_down_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         variety_name = QTableWidgetItem('品种')
         variety_name.setTextAlignment(Qt.AlignCenter)
         self.up_down_table.setItem(0, 0, variety_name)
@@ -369,12 +427,6 @@ class PriceIndexWin(QWidget):
                 self.up_down_table.setItem(1, col + 1, amplitude_name)
 
                 year_index += 1
-        # # 填数据
-        # for index, item in enumerate(data):
-        #     row = index + 2
-        #     item = QTableWidgetItem(str(item['variety_en']))
-        #     item.setTextAlignment(Qt.AlignCenter)
-        #     self.up_down_table.setItem(row, 0, item)
 
         # 填品种
         variety_list = sorted(list(set([item['variety_en'] for item in data])))
@@ -386,28 +438,77 @@ class PriceIndexWin(QWidget):
             self.up_down_table.setItem(cur_row, 0, v_item)
 
         # 填数据
-        for variety_item in data:
-            # 获取该item应该填的的起始行和列
-            pos_row, pos_column = self.get_up_down_table_pos(variety_item['variety_en'], variety_item['year'])
-            zd = variety_item['zd']
-            zd_item = QTableWidgetItem(zd if zd == '-' else '%.2f%%' % (zd * 100))
-            zd_item.setTextAlignment(Qt.AlignCenter)
-            if zd != '-' and zd < 0:
-                zd_item.setBackground(QBrush(QColor(20, 188, 80)))
-                zd_item.setForeground(QBrush(QColor(255, 255, 255)))
-            elif zd != '-' and zd > 0:
-                zd_item.setBackground(QBrush(QColor(216, 40, 46)))
-                zd_item.setForeground(QBrush(QColor(255, 255, 255)))
-            self.up_down_table.setItem(pos_row, pos_column, zd_item)
-            zf = variety_item['zf']
-            zf_item = QTableWidgetItem(zf if zf == '-' else '%.2f%%' % (zf * 100))
-            zf_item.setTextAlignment(Qt.AlignCenter)
-            self.up_down_table.setItem(pos_row, pos_column + 1, zf_item)
+        # 增加计涨计跌的显示格
+        self.up_down_table.insertColumn(col_count)
+        self.up_down_table.insertColumn(col_count + 1)
+        self.up_down_table.setSpan(0, col_count, 1, 2)
+        count_header = QTableWidgetItem('数量')
+        count_header.setTextAlignment(Qt.AlignCenter)
+        self.up_down_table.setItem(0, col_count, count_header)
+        counter_up = QTableWidgetItem('计涨')
+        counter_up.setTextAlignment(Qt.AlignCenter)
+        self.up_down_table.setItem(1, col_count, counter_up)
+        counter_down = QTableWidgetItem('计跌')
+        counter_down.setTextAlignment(Qt.AlignCenter)
+        self.up_down_table.setItem(1, col_count + 1, counter_down)
+
+        row_count = self.up_down_table.rowCount()
+
+        for row in range(2, row_count):
+            up, down = 0, 0  # 计涨计跌数
+            for col in range(1, col_count, 2):
+                v_item = self.up_down_table.item(row, 0)
+                dat_item = self.up_down_table.item(1, col)
+                show_data = dat_item.data(Qt.UserRole)
+                # 获取这行这列的数据
+                src_item = self.get_year_updown_obj(data, v_item.text(), show_data['year'])
+                if not src_item:
+                    continue
+                # 填数据
+                zd, zf = src_item['zd'], src_item['zf']
+                zd_str = str(zd) if zd == '-' else '%.2f%%' % (zd * 100)
+                zf_str = str(zf) if zf == '-' else '%.2f%%' % (zf * 100)
+
+                zd_item = QTableWidgetItem(zd_str)
+                zd_item.setTextAlignment(Qt.AlignCenter)
+                zd_item.setToolTip(f'{src_item["year"]}({src_item["variety_en"]})涨跌:{zd_str}')
+                self.up_down_table.setItem(row, col, zd_item)
+                zf_item = QTableWidgetItem(zf_str)
+                zf_item.setTextAlignment(Qt.AlignCenter)
+                zf_item.setToolTip(f'{src_item["year"]}({src_item["variety_en"]})波幅:{zf_str}')
+                self.up_down_table.setItem(row, col + 1, zf_item)
+
+                if zd != '-':
+                    if zd > 0:
+                        up += 1
+                        zd_item.setBackground(QBrush(QColor(216, 40, 46)))
+                        zd_item.setForeground(QBrush(QColor(255, 255, 255)))
+                    else:
+                        down += 1
+                        zd_item.setBackground(QBrush(QColor(20, 188, 80)))
+                        zd_item.setForeground(QBrush(QColor(255, 255, 255)))
+
+            up_item = QTableWidgetItem(str(up))
+            up_item.setTextAlignment(Qt.AlignCenter)
+            up_item.setToolTip(f'计涨{up}个')
+            self.up_down_table.setItem(row, col_count, up_item)
+            down_item = QTableWidgetItem(str(down))
+            down_item.setTextAlignment(Qt.AlignCenter)
+            down_item.setToolTip(f'计跌{down}个')
+            self.up_down_table.setItem(row, col_count + 1, down_item)
 
         # 显示表格
         self.up_down_table.show()
         self.data_table.hide()
         # self.export_button.setEnabled(True)
+        self.loading_cover.hide()
+
+    def get_year_updown_obj(self, source, variety, year):
+        for item in source:
+            if item['variety_en'] == variety and item['year'] == year:
+                return item
+        return None
+
 
     def get_up_down_table_pos(self, variety, year):
         pos_row, pos_column = -1, -1
@@ -444,13 +545,14 @@ class PriceIndexWin(QWidget):
         return pos_row, pos_column
 
     def to_analysis_price(self):
+        self.export_button.setEnabled(False)
         start_year = self.start_year.value()
         end_year = self.end_year.value()
         if start_year >= end_year:
             QMessageBox.critical(self, '错误', '起始年份需小于结束年份!')
             return
-        url = SERVER_2_0 + 'dsas/mquotes/year/extreme/?ys={}&ye={}&variety={}'.format(
-            start_year, end_year, self.variety_combobox.currentData()
+        url = SERVER_2_0 + 'dsas/iprice/year/extreme/?ys={}&ye={}&variety={}&pt={}'.format(
+            start_year, end_year, self.variety_combobox.currentData(), self.current_price_index
         )
         reply = self.network_manager.get(QNetworkRequest(QUrl(url)))
         reply.finished.connect(self.price_analysis_reply)
@@ -461,7 +563,6 @@ class PriceIndexWin(QWidget):
             logger.error('获取近x年指数分析数据 ERROR. STATUS:{}'.format(reply.error()))
         else:
             data = json.loads(reply.readAll().data().decode('utf8'))
-            # print(data)
             # 将数据绘制成图形
             if self.current_price_index == 'dominant':
                 title = f'{self.variety_combobox.currentText()}主力指数区间分析'
@@ -505,16 +606,6 @@ class PriceIndexWin(QWidget):
         self.loading_cover.hide()
         self.analysis_button.setEnabled(True)
 
-    def hide_price_analysis(self):  # 隐藏指数分析功能
-        if self.current_price_index == 'weight':
-            self.index_updown_button.hide()
-            self.all_updown.hide()
-        elif self.current_price_index == 'dominant':
-            self.index_updown_button.show()
-            self.all_updown.show()
-        else:
-            pass
-
     def set_current_price_index(self, index_type: str):
         """ 设置当前窗口类型 """
         if index_type not in ['weight', 'dominant']:
@@ -523,8 +614,6 @@ class PriceIndexWin(QWidget):
             del self.current_price_index
             self.current_price_index = None
         self.current_price_index = index_type
-
-        self.hide_price_analysis()
 
     def swap_data_show_style(self, init_flag):
         """ 转换数据显示
