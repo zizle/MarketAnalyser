@@ -551,7 +551,7 @@ class PriceIndexWin(QWidget):
         if start_year >= end_year:
             QMessageBox.critical(self, '错误', '起始年份需小于结束年份!')
             return
-        url = SERVER_2_0 + 'dsas/iprice/year/extreme/?ys={}&ye={}&variety={}&pt={}'.format(
+        url = SERVER_2_0 + 'dsas/iprice/year/extreme/?ys={}&ye={}&v={}&pt={}'.format(
             start_year, end_year, self.variety_combobox.currentData(), self.current_price_index
         )
         reply = self.network_manager.get(QNetworkRequest(QUrl(url)))

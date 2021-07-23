@@ -7,6 +7,8 @@ import json
 import datetime
 import pandas as pd
 from itertools import groupby
+
+from PyQt5.QtGui import QColor, QBrush
 from PyQt5.QtWidgets import (qApp, QWidget, QHBoxLayout, QVBoxLayout, QTableWidgetItem, QLabel, QSplitter, QTableWidget,
                              QComboBox, QDateEdit, QPushButton, QHeaderView, QMessageBox, QAbstractItemView,
                              QFileDialog)
@@ -108,10 +110,26 @@ class PricePositionWin(QWidget):
         self.table_widget = QWidget(self)
         table_layout = QVBoxLayout()
         table_layout.setContentsMargins(QMargins(0, 0, 0, 0))
+
+        opt_widget = QWidget(self.table_widget)
+        opt_lt = QHBoxLayout(opt_widget)
+        opt_lt.setContentsMargins(0,0,0,0)
+        opt_widget.setLayout(opt_lt)
+        # 日期选择，全品种净持率查看
+        self.all_date_edit = QDateEdit(self)
+        self.all_date_edit.setCalendarPopup(True)
+        self.all_date_edit.setDisplayFormat('yyyy-MM-dd')
+        self.all_date_edit.setDate(QDate.currentDate())
+        opt_lt.addWidget(self.all_date_edit)
+        self.all_query_button = QPushButton('查询全净持率', self)
+        opt_lt.addWidget(self.all_query_button)
+        opt_lt.addStretch()
         # 导出数据按钮
         self.export_button = QPushButton('导出EXCEL', self)
         self.export_button.setEnabled(False)
-        table_layout.addWidget(self.export_button, alignment=Qt.AlignTop | Qt.AlignRight)
+        opt_lt.addWidget(self.export_button)
+        opt_widget.setFixedHeight(30)
+        table_layout.addWidget(opt_widget)
         self.data_table = QTableWidget(self)
         self.data_table.verticalHeader().hide()
         self.data_table.setFocusPolicy(Qt.NoFocus)
@@ -121,6 +139,11 @@ class PricePositionWin(QWidget):
         self.data_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.data_table.setSelectionMode(QAbstractItemView.SingleSelection)
         table_layout.addWidget(self.data_table)
+        # 全品种净持仓率显示表
+        self.all_table = QTableWidget(self)
+        self.all_table.hide()
+        table_layout.addWidget(self.all_table)
+
         self.table_widget.setLayout(table_layout)
         splitter.addWidget(self.table_widget)
         splitter.setSizes([self.parent().height() * 0.6, self.parent().height() * 0.4])
@@ -159,6 +182,57 @@ class PricePositionWin(QWidget):
         self.analysis_button.clicked.connect(self.get_analysis_data)
         # 关联导出数据信息
         self.export_button.clicked.connect(self.export_table_to_excel)
+        # 查询全品种净持仓率的信号
+        self.all_query_button.clicked.connect(self.to_query_all_position)
+
+        self.current_table = 'single_contract'
+
+    def to_query_all_position(self):
+        self.show_loading("正在获取数据")
+        current_date = self.all_date_edit.text()
+        url = SERVER_2_0 + 'dsas/price-position/?ds={}&de={}'.format(current_date, current_date)
+        reply = self.network_manager.get(QNetworkRequest(QUrl(url)))
+        reply.finished.connect(self.all_variety_position_reply)
+
+    def all_variety_position_reply(self):
+        reply = self.sender()
+        self.loading_finished()
+        if reply.error():
+            logger.error('GET ALL VARIETY NET POSTION ERROR. STATUS:{}'.format(reply.error()))
+        else:
+            data = json.loads(reply.readAll().data().decode('utf8'))
+            self.show_all_variety_net_position(data.get('data', []))
+        reply.deleteLater()
+
+    def show_all_variety_net_position(self, data):
+        # 过滤data数据
+        show_list = list(filter(lambda x: x['variety_en'] == x['contract'], data))
+        self.all_table.clear()
+        titles = ['日期', '品种', '主力收盘价', '主力持仓量', '前20多单量', '前20空单量', '前20净持仓', '净持率']
+        columns = ['quotes_date', 'variety_name', 'close_price', 'position_volume', 'long_position', 'short_position',
+                   'net_position', 'net_rate']
+
+        self.all_table.setRowCount(len(show_list))
+        self.all_table.setColumnCount(len(columns))
+        self.all_table.setHorizontalHeaderLabels(titles)
+        for row, p_item in enumerate(show_list):
+            for col, key in enumerate(columns):
+                if key == 'net_rate':
+                    a = float(p_item['net_position'].replace(',', ''))
+                    b = float(p_item['position_volume'].replace(',', ''))
+                    rate = f'{round(a * 100 / b, 2)}%' if b > 0 else '-'
+                    item = QTableWidgetItem(rate)
+                else:
+                    item = QTableWidgetItem(str(p_item[key]))
+                item.setTextAlignment(Qt.AlignCenter)
+                if row % 2 == 0:
+                    item.setBackground(QBrush(QColor(230, 254, 238)))
+                self.all_table.setItem(row, col, item)
+        self.data_table.hide()
+        self.all_table.show()
+        self.current_table = 'all_variety'
+        if len(show_list) > 0:
+            self.export_button.setEnabled(True)
 
     def resizeEvent(self, event):
         super(PricePositionWin, self).resizeEvent(event)
@@ -299,7 +373,7 @@ class PricePositionWin(QWidget):
                 self.contract_combobox.currentText(), min_date, max_date
             )
         elif self.query_type == 'variety':
-            url = SERVER_2_0 + 'dsas/price-position/?ds={}&de={}&v={}'.format(
+            url = SERVER_2_0 + 'dsas/price-position/?ds={}&de={}&c={}'.format(
                 self.start_date.text(), self.end_date.text(), self.contract_combobox.currentText()
             )
         else:
@@ -366,23 +440,59 @@ class PricePositionWin(QWidget):
             t_item6.setTextAlignment(Qt.AlignCenter)
             self.data_table.setItem(row, 6, t_item6)
 
+        self.current_table = 'single_contract'
+        self.data_table.show()
+        self.all_table.hide()
+
     def set_current_chart_to_page(self, source_data: str, base_option: str):
         """ 设置数据到图形区域 """
         self.chart_container.set_chart_option(source_data, base_option)
 
     def export_table_to_excel(self):
         """ 导出表格数据到excel"""
-        # 1 读取表格数据
-        table_df = self.read_table_data()
-        # 2 选定保存的位置
-        # 保存的文件名称
-        filename = '{}价格-净持率数据'.format(self.contract_combobox.currentText())
-        filepath, _ = QFileDialog.getSaveFileName(self, '保存文件', filename, 'EXCEL文件(*.xlsx *.xls)')
-        if filepath:
-            # 3 导出数据
-            writer = pd.ExcelWriter(filepath, engine='xlsxwriter', datetime_format='YYYY-MM-DD')
-            table_df.to_excel(writer, sheet_name='价格-净持率', index=False, encoding='utf8')
-            writer.save()
+        if self.current_table == 'single_contract':
+            # 1 读取表格数据:
+            table_df = self.read_table_data()
+            # 2 选定保存的位置
+            # 保存的文件名称
+            filename = '{}价格-净持率数据'.format(self.contract_combobox.currentText())
+            filepath, _ = QFileDialog.getSaveFileName(self, '保存文件', filename, 'EXCEL文件(*.xlsx *.xls)')
+            if filepath:
+                # 3 导出数据
+                writer = pd.ExcelWriter(filepath, engine='xlsxwriter', datetime_format='YYYY-MM-DD')
+                table_df.to_excel(writer, sheet_name='价格-净持率', index=False, encoding='utf8')
+                writer.save()
+        if self.current_table == 'all_variety':
+            df = self.read_all_table_data() # 读取全品种表格的数据
+            # 2 选定保存的位置
+            # 保存的文件名称
+            filename = '{}全品种价格-净持率数据'.format(self.all_date_edit.text())
+            filepath, _ = QFileDialog.getSaveFileName(self, '保存文件', filename, 'EXCEL文件(*.xlsx *.xls)')
+            if filepath:
+                # 3 导出数据
+                writer = pd.ExcelWriter(filepath, engine='xlsxwriter', datetime_format='YYYY-MM-DD')
+                df.to_excel(writer, sheet_name='全品种价格-净持率', index=False, encoding='utf8')
+                writer.save()
+
+    def read_all_table_data(self):
+        header_list = []
+        value_list = []
+        for header_col in range(self.all_table.columnCount()):
+            header_list.append(
+                self.all_table.horizontalHeaderItem(header_col).text()
+            )
+        for row in range(self.all_table.rowCount()):
+            row_list = []
+            for col in range(self.all_table.columnCount()):
+                item_value = self.all_table.item(row, col).text()
+                try:
+                    value = datetime.datetime.strptime(item_value, '%Y%m%d') if col == 0 else float(
+                        self.all_table.item(row, col).text())
+                except ValueError:
+                    value = item_value
+                row_list.append(value)
+            value_list.append(row_list)
+        return pd.DataFrame(value_list, columns=header_list)
 
     def read_table_data(self):
         """ 读取表格数据 """
@@ -404,3 +514,4 @@ class PricePositionWin(QWidget):
                 row_list.append(value)
             value_list.append(row_list)
         return pd.DataFrame(value_list, columns=header_list)
+
