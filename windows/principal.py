@@ -12,6 +12,7 @@ from settings import WINDOW_TITLE, SYSTEM_MENUS
 
 from .price_position import PricePositionWin
 from .price_index import WeightPriceWin, DominantPriceWin
+from .net_position import NetPositionRateWidget
 
 
 class MainWindow(QMainWindow):
@@ -71,10 +72,10 @@ class MainWindow(QMainWindow):
                 action.triggered.connect(self.select_menu_action)
 
     def set_default_homepage(self):
-        win = PricePositionWin(self)
+        win = NetPositionRateWidget(self)
         self.setCentralWidget(win)
-        self.current_win = 11  # 价格净持率的窗口id(详见settings.py)
-        self.win_name_label.setText("价格-净持率")
+        self.current_win = 10  # 价格净持率的窗口id(详见settings.py)
+        self.win_name_label.setText("净持率分析")
 
     def select_menu_action(self):
         """ 选择了某个菜单 """
@@ -97,6 +98,8 @@ class MainWindow(QMainWindow):
         elif action_id == 13:  # 主力合约价格指数窗口
             page = DominantPriceWin(self)
             page.set_current_price_index('dominant')
+        elif action_id == 10:  # 净持仓率分析
+            page = NetPositionRateWidget(self)
         else:
             page = QLabel("该功能未开放")
         return page

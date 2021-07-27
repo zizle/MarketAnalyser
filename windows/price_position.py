@@ -123,6 +123,10 @@ class PricePositionWin(QWidget):
         opt_lt.addWidget(self.all_date_edit)
         self.all_query_button = QPushButton('查询全净持率', self)
         opt_lt.addWidget(self.all_query_button)
+        # 增加净持率
+        self.add_net_rate = QPushButton('增加列', self)
+        opt_lt.addWidget(self.add_net_rate)
+
         opt_lt.addStretch()
         # 导出数据按钮
         self.export_button = QPushButton('导出EXCEL', self)
@@ -134,7 +138,7 @@ class PricePositionWin(QWidget):
         self.data_table.verticalHeader().hide()
         self.data_table.setFocusPolicy(Qt.NoFocus)
         self.data_table.setColumnCount(7)
-        self.data_table.setHorizontalHeaderLabels(['日期', '收盘价', '总持仓', '多头', '空头', '净持仓', '净持仓率'])
+        self.data_table.setHorizontalHeaderLabels(['日期', '收盘价', '总持仓', '多头', '空头', '净持仓', '净持仓率%'])
         self.data_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.data_table.setSelectionBehavior(QAbstractItemView.SelectRows)
         self.data_table.setSelectionMode(QAbstractItemView.SingleSelection)
@@ -184,8 +188,72 @@ class PricePositionWin(QWidget):
         self.export_button.clicked.connect(self.export_table_to_excel)
         # 查询全品种净持仓率的信号
         self.all_query_button.clicked.connect(self.to_query_all_position)
+        # 增加净持率列的信号
+        self.add_net_rate.setEnabled(False)
+        self.add_net_rate.clicked.connect(self.to_add_new_column_rate)
+        # 点击表头排序
+        self.all_table.horizontalHeader().sectionClicked.connect(self.all_table_horizontal_clicked)
 
         self.current_table = 'single_contract'
+
+    def all_table_horizontal_clicked(self, col):
+        if col < 7:
+            return
+        self.all_table.sortItems(col)
+        # 重新设置一下颜色
+        for row in range(self.all_table.rowCount()):
+            for col in range(self.all_table.columnCount()):
+                item = self.all_table.item(row, col)
+                if row % 2 == 0:
+                    item.setBackground(QBrush(QColor(230, 254, 238)))
+                else:
+                    item.setBackground(QBrush(QColor(255, 255, 255)))
+
+    def to_add_new_column_rate(self):  # 新增净持率列
+        new_column_date = self.all_date_edit.text()
+        self.show_loading("正在获取数据")
+        url = SERVER_2_0 + 'dsas/price-position/?ds={}&de={}'.format(new_column_date, new_column_date)
+        reply = self.network_manager.get(QNetworkRequest(QUrl(url)))
+        reply.finished.connect(self.new_column_data_reply)
+
+    def new_column_data_reply(self):
+        reply = self.sender()
+        self.loading_finished()
+        if reply.error():
+            logger.error('GET NEW COLUMN NET POSTION ERROR. STATUS:{}'.format(reply.error()))
+        else:
+            data = json.loads(reply.readAll().data().decode('utf8'))
+            variety_data = data.get('data', None)
+            if not variety_data:
+                return
+            current_columns = self.all_table.columnCount()
+            self.all_table.insertColumn(current_columns)
+            self.all_table.setHorizontalHeaderItem(current_columns, QTableWidgetItem(self.all_date_edit.text()))
+            self.insert_column_data(variety_data)
+        reply.deleteLater()
+
+    def insert_column_data(self, data):  # 添加列数据
+        # 数据转为dict形式
+        rate_data = {item['variety_en']: item for item in data}
+        current_column = self.all_table.columnCount() - 1
+        for row in range(self.all_table.rowCount()):
+            row_item = self.all_table.item(row, 0)
+            variety_en = row_item.data(Qt.UserRole)['variety_en']
+            data_item = rate_data.get(variety_en)
+            if not data_item:
+                continue
+            # 计算净持率
+            a = float(data_item['net_position'].replace(',', ''))
+            b = float(data_item['position_volume'].replace(',', ''))
+            rate = f'{round(a * 100 / b, 2)}%' if b > 0 else '-'
+            display = round(a * 100 / b, 2) if b > 0 else '-'
+
+            new_item = QTableWidgetItem(rate)
+            new_item.setTextAlignment(Qt.AlignCenter)
+            new_item.setData(Qt.DisplayRole, display)
+            self.all_table.setItem(row, current_column, new_item)
+            if row % 2 == 0:
+                new_item.setBackground(QBrush(QColor(230, 254, 238)))
 
     def to_query_all_position(self):
         self.show_loading("正在获取数据")
@@ -208,7 +276,7 @@ class PricePositionWin(QWidget):
         # 过滤data数据
         show_list = list(filter(lambda x: x['variety_en'] == x['contract'], data))
         self.all_table.clear()
-        titles = ['日期', '品种', '主力收盘价', '主力持仓量', '前20多单量', '前20空单量', '前20净持仓', '净持率']
+        titles = ['日期', '品种', '主力收盘价', '总持仓量', '前20多单量', '前20空单量', '前20净持仓', '净持率%']
         columns = ['quotes_date', 'variety_name', 'close_price', 'position_volume', 'long_position', 'short_position',
                    'net_position', 'net_rate']
 
@@ -222,17 +290,23 @@ class PricePositionWin(QWidget):
                     b = float(p_item['position_volume'].replace(',', ''))
                     rate = f'{round(a * 100 / b, 2)}%' if b > 0 else '-'
                     item = QTableWidgetItem(rate)
+                    display = round(a * 100 / b, 2) if b > 0 else '-'
+                    item.setData(Qt.DisplayRole, display)
                 else:
                     item = QTableWidgetItem(str(p_item[key]))
                 item.setTextAlignment(Qt.AlignCenter)
                 if row % 2 == 0:
                     item.setBackground(QBrush(QColor(230, 254, 238)))
+                if col == 0:
+                    item.setData(Qt.UserRole, {'variety_en': p_item['variety_en']})
                 self.all_table.setItem(row, col, item)
+
         self.data_table.hide()
         self.all_table.show()
         self.current_table = 'all_variety'
         if len(show_list) > 0:
             self.export_button.setEnabled(True)
+            self.add_net_rate.setEnabled(True)
 
     def resizeEvent(self, event):
         super(PricePositionWin, self).resizeEvent(event)

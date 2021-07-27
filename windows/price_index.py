@@ -509,7 +509,6 @@ class PriceIndexWin(QWidget):
                 return item
         return None
 
-
     def get_up_down_table_pos(self, variety, year):
         pos_row, pos_column = -1, -1
         row_count = self.up_down_table.rowCount()
