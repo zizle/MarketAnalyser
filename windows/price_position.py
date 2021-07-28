@@ -233,6 +233,8 @@ class PricePositionWin(QWidget):
         reply.deleteLater()
 
     def insert_column_data(self, data):  # 添加列数据
+        # 过滤data数据
+        data = list(filter(lambda x: x['variety_en'] == x['contract'], data))
         # 数据转为dict形式
         rate_data = {item['variety_en']: item for item in data}
         current_column = self.all_table.columnCount() - 1
@@ -284,6 +286,7 @@ class PricePositionWin(QWidget):
         self.all_table.setColumnCount(len(columns))
         self.all_table.setHorizontalHeaderLabels(titles)
         for row, p_item in enumerate(show_list):
+            print(p_item)
             for col, key in enumerate(columns):
                 if key == 'net_rate':
                     a = float(p_item['net_position'].replace(',', ''))
